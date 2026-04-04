@@ -129,6 +129,17 @@ function App() {
     setSelectedNode(null);
   }, []);
 
+  const handleBuildAim = () => {
+    setLiveLog(`[KERNEL] Target Acquired: ${mountedPath}\nInitiating Architectural Scan...\n`);
+    invoke('build_aim_binary', { projectPath: mountedPath })
+      .then((res: any) => {
+        alert(`[KERNEL SUCCESS]\n${res}`);
+        setLiveLog(prev => `[KERNEL] ${res}\n` + prev);
+        loadGraph(mountedPath);
+      })
+      .catch((err: any) => alert(`[KERNEL ERROR]\n${err}`));
+  };
+
   const handleMountProject = async () => {
     try {
       const selectedPath = await open({
@@ -229,9 +240,14 @@ function App() {
             }}>
             garbage_collector.rs
           </div>
-          <button className="tab-btn" style={{ marginTop: '16px', background: 'rgba(99, 102, 241, 0.1)', border: '1px solid #6366f1', color: '#818cf8', flexShrink: 0, height: '40px' }} onClick={handleMountProject}>
-            Mount Project
-          </button>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '16px' }}>
+            <button className="tab-btn" style={{ background: 'rgba(99, 102, 241, 0.1)', border: '1px solid #6366f1', color: '#818cf8', height: '40px' }} onClick={handleBuildAim}>
+              Generate Physical .aim
+            </button>
+            <button className="tab-btn" style={{ background: 'rgba(34, 197, 94, 0.1)', border: '1px solid #22c55e', color: '#4ade80', height: '40px' }} onClick={handleMountProject}>
+              Mount Project
+            </button>
+          </div>
         </div>
       </div>
 
