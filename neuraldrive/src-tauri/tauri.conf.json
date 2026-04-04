@@ -22,16 +22,8 @@
     }
   },
   "bundle": {
-    "active": true,
+    "active": false,
     "targets": "all",
-    "windows": {
-      "wix": {
-        "language": "en-US",
-        "componentRefs": [
-          "MainExecutable"
-        ]
-      }
-    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

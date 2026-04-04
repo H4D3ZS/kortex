@@ -10,7 +10,7 @@ In the 2024–2026 development cycle, AI interactions were predominantly bounded
 ## 2. The Parametric Solution: `.aim`
 The `.aim` (AI-Interactive Memory) Virtual File System shifts state from an **Active Tool Call** framework into an **Environmental Injection** vector. 
 
-Instead of treating memory as a static text file to be read, `.aim` treats it as a **Dynamic Latent State**. By continuously digesting textual logs into float32 semantic latent structures using algorithms like **TurboQuant**, massive textual histories (codebases, documentation, chat logs) are compressed down to a single **"Gist Vector"** (1536 dim).
+Instead of treating memory as a static text file to be read, `.aim` treats it as a **Dynamic Latent State**. By continuously digesting textual logs into float32 semantic latent structures using algorithms like **TurboQuant**, massive textual histories are compressed down to a single **"Gist Vector"** (1536 dim).
 
 ### 2.1 Mechanism of Action: Delta Injection
 Unlike RAG (Retrieval-Augmented Generation), which searches for snippets, `.aim` evolves a continuous state:
