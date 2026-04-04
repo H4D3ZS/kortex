@@ -47,6 +47,7 @@ function App() {
   const [highlightNodes, setHighlightNodes] = useState(new Set());
   const [highlightLinks, setHighlightLinks] = useState(new Set());
   const [liveLog, setLiveLog] = useState('');
+  const [fileContent, setFileContent] = useState(MOCK_MEMORY);
   const graphRef = useRef<any>(null);
 
   useEffect(() => {
@@ -153,6 +154,14 @@ function App() {
     }
   };
 
+  useEffect(() => {
+    if (selectedNode && selectedNode.path && activeTab === 'explorer') {
+      invoke('read_file_content', { filePath: selectedNode.path })
+        .then((res: any) => setFileContent(res))
+        .catch((err) => setFileContent(`// [UNABLE TO READ FILE CONTENT]\n${err}`));
+    }
+  }, [selectedNode, activeTab]);
+
   // Secure Event Listener tracking System Daemon broadcasts
   useEffect(() => {
     if (!selectedNode) return;
@@ -241,15 +250,15 @@ function App() {
         {activeTab === 'explorer' ? (
           <>
             <div className="editor-header">
-              <span>c:\\kortex\\.aim\\memory.md</span>
+              <span>{selectedNode?.path || 'c:\\kortex\\.aim\\memory.md'}</span>
               <span className="tag">Parametric Delta Sync</span>
             </div>
             <div className="monaco-wrapper">
               <Editor
                 height="100%"
-                language="aim"
+                language={selectedNode ? (['rs'].includes(selectedNode.name.split('.').pop()) ? 'rust' : ['ts', 'tsx'].includes(selectedNode.name.split('.').pop()) ? 'typescript' : ['json'].includes(selectedNode.name.split('.').pop()) ? 'json' : 'aim') : 'aim'}
                 theme="neural-dark"
-                value={MOCK_MEMORY}
+                value={fileContent}
                 options={{
                   minimap: { enabled: false },
                   fontFamily: "'JetBrains Mono', monospace",

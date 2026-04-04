@@ -55,7 +55,8 @@ fn get_aim_nodes(project_path: String) -> serde_json::Value {
                 "group": n_group,
                 "val": 3.0,
                 "name": file_name,
-                "type": n_type
+                "type": n_type,
+                "path": path_str
             }));
 
             id_map.insert(path.to_path_buf(), current_id);
@@ -74,7 +75,8 @@ fn get_aim_nodes(project_path: String) -> serde_json::Value {
                         "group": 8, // Directory Node Element
                         "val": 5.0,
                         "name": parent.file_name().unwrap_or_default().to_string_lossy().into_owned(),
-                        "type": "Network Structure"
+                        "type": "Network Structure",
+                        "path": parent.to_string_lossy()
                     }));
                     id_map.insert(parent.to_path_buf(), current_id);
                     links.push(serde_json::json!({
@@ -96,6 +98,11 @@ fn get_aim_nodes(project_path: String) -> serde_json::Value {
         "nodes": nodes,
         "links": links
     })
+}
+
+#[tauri::command]
+fn read_file_content(file_path: String) -> Result<String, String> {
+    std::fs::read_to_string(&file_path).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -261,7 +268,7 @@ pub fn run() {
             Ok(())
         })
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![get_aim_nodes, build_aim_binary])
+        .invoke_handler(tauri::generate_handler![get_aim_nodes, build_aim_binary, read_file_content])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
