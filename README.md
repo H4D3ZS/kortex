@@ -23,10 +23,25 @@ Thanks to **LLM Prompt Prefix Caching**, processing a 50MB architecture state co
 - **Quantum Resistant**: Proof against CRQC (Cryptographically Relevant Quantum Computers) using Lattice-based cryptography.
 - **Hardware Root of Trust**: Keys are optionally stored in the Secure Enclave/TPM to ensure E2E Hash Node integrity.
 
-## 🚀 Quick Start
-1. **Install the Daemon**: `cargo install aim-vfs`
-2. **Mount a Project**: `aim-vfs mount ./my-project`
-3. **Open IDE**: Start Cursor, Claude Code, or VSCodium. The `.aim` state is injected automatically.
+## 🚀 Installation & Setup
+NeuralDrive is a standalone desktop application that mathematically compresses your entire codebase into a single memory token for AI Agents, while visualizing your code as an interactive 3D Neural Network.
+
+1. **Clone the repository**: `git clone https://github.com/H4D3ZS/kortex.git`
+2. **Navigate to the UI folder**: `cd kortex/neuraldrive`
+3. **Install Dependencies**: `npm install`
+4. **Compile the Native Executable**: `npm run tauri build`
+
+*(Your optimized, standalone Windows executable will be generated natively at `kortex/target/release/neuraldrive.exe`!)*
+
+## 🧠 How to Use NeuralDrive (.aim)
+1. **Open the App**: Launch `neuraldrive.exe`.
+2. **Mount a Workspace**: Look at the bottom-left sidebar and click **Mount Project**.
+3. **Select your Codebase**: A Native Windows folder prompt will appear. Select any heavy local repository on your system (e.g., a massive project with 5,000+ files).
+4. **Watch the Crunch**: The Rust Semantic Daemon will instantly parse every single file in that folder dynamically and render it on your screen as a massive **3D Brain Graph**.
+5. **Explore your Code in 3D**: You can rotate, zoom, and physically click on any node in the WebGL graph. Clicking a node opens up its real-time **Telemetry**, and clicking the **Explorer** tab at the top lets you explicitly read the exact physical source code of the node you intimately touched.
+
+> **What does it actually do for AI?**
+> Behind the scenes, when you mounted that folder, the Daemon securely generated a highly compressed cryptographic `memory.aim` binary. It acts as an absolute "Zero-Token" memory state. Instead of painfully forcing an AI Agent (like Cursor or Claude Code) to manually read all 5,000 of your files and aggressively bloat your Context Window, the AI can ingest the `.aim` payload and instantly understand your entire architecture securely offline!
 
 ## 💡 Why This Matters (The Hardware Reality)
 
