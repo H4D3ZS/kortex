@@ -3,5 +3,5 @@ members = [
     "daemon",
     "vfs_layer",
     "neuraldrive/src-tauri"
-, "aim-proxy"]
+, "aim-proxy", "libaim"]
 resolver = "2"
