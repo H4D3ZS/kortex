@@ -28,3 +28,4 @@ notify = "6.1.1"
 daemon = { path = "../../daemon" }
 sha2 = "0.11.0"
 hkdf = "0.13.0"
+tauri-plugin-dialog = "2.6.0"

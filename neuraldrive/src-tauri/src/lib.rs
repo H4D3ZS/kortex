@@ -5,12 +5,11 @@ use std::sync::mpsc::channel;
 use walkdir::WalkDir;
 
 #[tauri::command]
-fn get_aim_nodes() -> serde_json::Value {
+fn get_aim_nodes(project_path: String) -> serde_json::Value {
     let mut nodes = Vec::new();
     let mut links = Vec::new();
     
-    // Anchor to the true user workspace to pull AST boundaries literally!
-    let workspace_path = std::path::Path::new("C:\\Users\\HADES\\Desktop\\kortex");
+    let workspace_path = std::path::Path::new(&project_path);
     let mut id_map = std::collections::HashMap::new();
     let mut current_id = 0;
 
@@ -100,8 +99,8 @@ fn get_aim_nodes() -> serde_json::Value {
 }
 
 #[tauri::command]
-fn build_aim_binary() -> Result<String, String> {
-    let aim_dir = "C:\\Users\\HADES\\Desktop\\kortex\\.aim";
+fn build_aim_binary(project_path: String) -> Result<String, String> {
+    let aim_dir = format!("{}\\.aim", project_path);
     let aim_path = format!("{}\\memory.aim", aim_dir);
     
     std::fs::create_dir_all(aim_dir).map_err(|e| e.to_string())?;
@@ -119,7 +118,7 @@ fn build_aim_binary() -> Result<String, String> {
     // Using Sha256 + HKDF to forcefully extract genuine real-world vector distributions out of physical codebase parameters!
     let mut hasher = sha2::Sha256::new();
     use sha2::Digest;
-    for entry in walkdir::WalkDir::new("C:\\Users\\HADES\\Desktop\\kortex").into_iter().filter_map(|e| e.ok()) {
+    for entry in walkdir::WalkDir::new(&project_path).into_iter().filter_map(|e| e.ok()) {
         if entry.path().is_file() {
             let path_str = entry.path().to_string_lossy();
             if !path_str.contains("node_modules") && !path_str.contains("target") && !path_str.contains(".git") {
@@ -168,6 +167,7 @@ fn build_aim_binary() -> Result<String, String> {
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let app_handle = app.handle().clone();
 

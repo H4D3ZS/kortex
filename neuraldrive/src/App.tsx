@@ -3,6 +3,7 @@ import Editor, { useMonaco } from '@monaco-editor/react';
 import ForceGraph3D from 'react-force-graph-3d';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { open } from '@tauri-apps/plugin-dialog';
 import "./App.css";
 
 const MOCK_MEMORY = `---
@@ -38,6 +39,7 @@ const GROUP_COLORS = [
 function App() {
   const monaco = useMonaco();
   const [activeTab, setActiveTab] = useState<'explorer' | 'graph'>('graph');
+  const [mountedPath, setMountedPath] = useState("C:\\Users\\HADES\\Desktop\\kortex");
 
   const [graphData, setGraphData] = useState<{ nodes: any[], links: any[] }>({ nodes: [], links: [] });
 
@@ -75,9 +77,8 @@ function App() {
   }, [monaco]);
 
   // IPC Connection on Boot
-  useEffect(() => {
-    // Queries genuinely compiled Node mappings from the local Rust backend
-    invoke('get_aim_nodes').then((data: any) => {
+  const loadGraph = (targetPath: string) => {
+    invoke('get_aim_nodes', { projectPath: targetPath }).then((data: any) => {
       const { nodes, links } = data;
       nodes.forEach((n: any) => { n.neighbors = []; n.links = []; });
       links.forEach((link: any) => {
@@ -88,6 +89,10 @@ function App() {
       });
       setGraphData({ nodes, links });
     }).catch(console.error);
+  };
+
+  useEffect(() => {
+    loadGraph(mountedPath);
   }, []);
 
   const handleNodeClick = useCallback((node: any) => {
@@ -123,13 +128,29 @@ function App() {
     setSelectedNode(null);
   }, []);
 
-  const handleBuildAim = () => {
-    invoke('build_aim_binary', {})
-      .then((res: any) => {
-        alert(`[KERNEL SUCCESS]\n${res}`);
-        setLiveLog(prev => `[KERNEL] ${res}\n` + prev);
-      })
-      .catch((err: any) => alert(`[KERNEL ERROR]\n${err}`));
+  const handleMountProject = async () => {
+    try {
+      const selectedPath = await open({
+        directory: true,
+        multiple: false,
+        title: "Mount Neural Workspace"
+      });
+
+      if (selectedPath && typeof selectedPath === 'string') {
+        setMountedPath(selectedPath);
+        setLiveLog(`[KERNEL] Target Acquired: ${selectedPath}\nInitiating Architectural Scan...\n`);
+
+        invoke('build_aim_binary', { projectPath: selectedPath })
+          .then((res: any) => {
+            alert(`[KERNEL SUCCESS]\n${res}`);
+            setLiveLog(prev => `[KERNEL] ${res}\n` + prev);
+            loadGraph(selectedPath);
+          })
+          .catch((err: any) => alert(`[KERNEL ERROR]\n${err}`));
+      }
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   // Secure Event Listener tracking System Daemon broadcasts
@@ -199,8 +220,8 @@ function App() {
             }}>
             garbage_collector.rs
           </div>
-          <button className="tab-btn" style={{ marginTop: '16px', background: 'rgba(99, 102, 241, 0.1)', border: '1px solid #6366f1', color: '#818cf8', flexShrink: 0, height: '40px' }} onClick={handleBuildAim}>
-            Generate Physical .aim
+          <button className="tab-btn" style={{ marginTop: '16px', background: 'rgba(99, 102, 241, 0.1)', border: '1px solid #6366f1', color: '#818cf8', flexShrink: 0, height: '40px' }} onClick={handleMountProject}>
+            Mount Project
           </button>
         </div>
       </div>
