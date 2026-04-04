@@ -1,6 +1,6 @@
 # .aim Neural Virtual File System (AI-Interactive Memory)
 
-![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
+![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)
 ![Build: Rust 1.80+](https://img.shields.io/badge/Rust-1.80%2B-orange.svg)
 ![Security: Post-Quantum](https://img.shields.io/badge/Security-Post--Quantum-green.svg)
 
