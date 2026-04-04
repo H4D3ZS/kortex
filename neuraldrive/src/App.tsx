@@ -183,10 +183,20 @@ function App() {
 
         <div className="file-list">
           <span className="stats-label" style={{ marginBottom: "8px", marginTop: "12px" }}>Active Neurons</span>
-          <div className="file-item active">
+          <div
+            className={`file-item ${selectedNode?.name?.includes('memory.md') ? 'active' : ''}`}
+            onClick={() => {
+              const n = graphData.nodes.find(n => n.name.includes('memory'));
+              if (n) handleNodeClick(n);
+            }}>
             memory.md (.aim)
           </div>
-          <div className="file-item">
+          <div
+            className={`file-item ${selectedNode?.name?.includes('garbage_collector.rs') ? 'active' : ''}`}
+            onClick={() => {
+              const n = graphData.nodes.find(n => n.name.includes('garbage_collector.rs'));
+              if (n) handleNodeClick(n);
+            }}>
             garbage_collector.rs
           </div>
           <button className="tab-btn" style={{ marginTop: '16px', background: 'rgba(99, 102, 241, 0.1)', border: '1px solid #6366f1', color: '#818cf8', flexShrink: 0, height: '40px' }} onClick={handleBuildAim}>
@@ -233,6 +243,10 @@ function App() {
             <ForceGraph3D
               ref={graphRef}
               graphData={graphData}
+              nodeResolution={6}
+              linkResolution={3}
+              enableNodeDrag={false}
+              cooldownTicks={150}
               nodeColor={(node: any) => {
                 if (highlightNodes.size === 0) return GROUP_COLORS[node.group];
                 return highlightNodes.has(node) ? GROUP_COLORS[node.group] : 'rgba(255,255,255,0.05)';
