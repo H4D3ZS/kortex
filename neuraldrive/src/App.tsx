@@ -150,15 +150,8 @@ function App() {
 
       if (selectedPath && typeof selectedPath === 'string') {
         setMountedPath(selectedPath);
-        setLiveLog(`[KERNEL] Target Acquired: ${selectedPath}\nInitiating Architectural Scan...\n`);
-
-        invoke('build_aim_binary', { projectPath: selectedPath })
-          .then((res: any) => {
-            alert(`[KERNEL SUCCESS]\n${res}`);
-            setLiveLog(prev => `[KERNEL] ${res}\n` + prev);
-            loadGraph(selectedPath);
-          })
-          .catch((err: any) => alert(`[KERNEL ERROR]\n${err}`));
+        setLiveLog(`[KERNEL] Workspace Extracted: ${selectedPath}\nPopulating 3D WebGL Coordinates...\n`);
+        loadGraph(selectedPath);
       }
     } catch (err) {
       console.error(err);
