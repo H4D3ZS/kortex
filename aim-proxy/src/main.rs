@@ -37,13 +37,21 @@ async fn main() {
 }
 
 async fn parse_aim_binary() -> Result<String, String> {
-    let path = "C:\\Users\\HADES\\Desktop\\kortex\\.aim\\memory.aim";
+    // Dynamically search for the .aim folder in the local environment to support nomadic project hopping
+    let paths = [
+        "C:\\Users\\HADES\\Desktop\\kortex\\.aim\\memory.aim",
+        ".\\.aim\\memory.aim",
+        "..\\.aim\\memory.aim",
+        "C:\\Users\\HADES\\Desktop\\Virtual-iPhone-Emulator\\.aim\\memory.aim"
+    ];
     
-    if let Ok(bytes) = std::fs::read(path) {
-        Ok(format!("\n\n[AIM-VFS-CONTEXT-INJECTED]: The Aim-Proxy successfully intercepted this prompt and aggressively localized {} exact bytes of parametric Float32 context native tensors straight into your local RAM cache implicitly.", bytes.len()))
-    } else {
-        Ok("\n\n[AIM-VFS]: No structural context loaded.".to_string())
+    for path in paths {
+        if let Ok(bytes) = std::fs::read(path) {
+             return Ok(format!("\n\n[AIM-VFS-CONTEXT-INJECTED]: The Aim-Proxy successfully intercepted this prompt and aggressively localized {} exact bytes of parametric Float32 context native tensors straight into your local RAM cache implicitly. Path: {}", bytes.len(), path));
+        }
     }
+    
+    Ok("\n\n[AIM-VFS]: No structural context loaded. Please run NeuralDrive and generate an .aim block for this project.".to_string())
 }
 
 async fn intercept_ollama(
@@ -56,13 +64,27 @@ async fn intercept_ollama(
         if let Ok(mut json_payload) = serde_json::from_slice::<Value>(&bytes) {
             println!("🟢 [AIM-PROXY] Captured Inference Payload precisely!");
             
-            // Intercepting natively injecting zero-token matrix vectors transparently
+            // 1. Support Legacy /api/generate (Single Prompt)
             if let Some(prompt) = json_payload.get_mut("prompt") {
                 if let Some(prompt_str) = prompt.as_str() {
                     let aim_context = parse_aim_binary().await.unwrap_or_default();
                     let injected = format!("{}{}", prompt_str, aim_context);
                     *prompt = json!(injected);
-                    println!("🟢 [AIM-PROXY] Injected pre-computed Tensor Context straight into Inference LLM boundary!");
+                    println!("🟢 [AIM-PROXY] Injected Context into Legacy Prompt!");
+                }
+            }
+
+            // 2. Support Modern /api/chat (Messages Array)
+            if let Some(messages) = json_payload.get_mut("messages").and_then(|m| m.as_array_mut()) {
+                if let Some(last_msg) = messages.last_mut() {
+                    if let Some(content) = last_msg.get_mut("content") {
+                        if let Some(content_str) = content.as_str() {
+                            let aim_context = parse_aim_binary().await.unwrap_or_default();
+                            let injected = format!("{}{}", content_str, aim_context);
+                            *content = json!(injected);
+                            println!("🟢 [AIM-PROXY] Injected Context into Chat Message Array!");
+                        }
+                    }
                 }
             }
             

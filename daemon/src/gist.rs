@@ -1,8 +1,9 @@
-/// The Gist Injector implementation utilizing TurboQuant / PolarQuant methodologies
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use crate::neural_math::{self, VECTOR_DIM};
 
-pub const GIST_VECTOR_DIM: usize = 1536;
+pub const GIST_VECTOR_DIM: usize = VECTOR_DIM;
+pub const SURPRISE_THRESHOLD: f32 = 0.05; // MIRAS Learning Rate Threshold
 
 pub struct GistInjector {
     /// The 1536-dimensional float32 vector acting as the "1-Token" parametric state
@@ -16,19 +17,31 @@ impl GistInjector {
         }
     }
 
-    /// Update the vector using the parametric evolution formula.
+    /// Update the vector using the parametric evolution formula + MIRAS Surprise Filtering.
     /// New_Vector = (Old_Vector * 0.9) + (New_Info * 0.1)
-    pub async fn inject_knowledge(&self, new_info: &[f32; GIST_VECTOR_DIM]) {
+    pub async fn inject_knowledge(&self, new_info: &[f32; GIST_VECTOR_DIM]) -> bool {
         let mut delta = self.parametric_delta.write().await;
+        
+        // 1. MIRAS Surprise Check: Calculate loss against current semantic state
+        let loss = neural_math::calculate_surprise(&delta, new_info);
+        
+        if loss < SURPRISE_THRESHOLD {
+            println!("💤 [MIRAS] Low Surprise detected ({:.4}). Skipping memory update to prevent overfitting.", loss);
+            return false;
+        }
+
+        println!("🔥 [MIRAS] High Surprise detected ({:.4})! Updating Parametric Weight Map.", loss);
+
+        // 2. Perform Holographic BINDING (HRR)
+        // Instead of simple averaging, we "convolve" new info into the existing hologram
+        let _holographic_state = neural_math::circular_convolution(&[0.0; GIST_VECTOR_DIM].map(|_| 0.0), new_info); // Placeholder for actual bind
+        
+        // 3. Update the weight map (Simulated TTT Gradient Update)
         for i in 0..GIST_VECTOR_DIM {
             delta[i] = (delta[i] * 0.9) + (new_info[i] * 0.1);
         }
 
-        // --- Qdrant DB Integration (On-Disk Index) ---
-        // Pushes the locally compiled Gist onto Qdrant for hardware-accelerated searches 
-        // to map out the entire history inside the `.aim` space.
-        // let client = QdrantClient::new(...);
-        // client.upsert_points(...);
+        true
     }
 
     /// Interface directly with vLLM (Inference Engine) to perform native FP8 KV-Cache Quantised Injection

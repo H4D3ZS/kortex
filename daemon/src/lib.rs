@@ -6,6 +6,7 @@ pub mod symlink;
 pub mod watcher;
 pub mod chain;
 pub mod watermark;
+pub mod neural_math;
 
 /// The Cognitive Kernel represents the VFS daemon bridging .aim files and the system.
 pub struct CognitiveKernel {
