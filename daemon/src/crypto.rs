@@ -1,4 +1,4 @@
-use std::sync::Arc;
+// Removed unused Arc import
 
 pub struct HybridSignature {
     pub ed25519_sig: Vec<u8>,
@@ -32,7 +32,7 @@ impl SecurityLayer {
     }
 
     /// Quickly validates if mathematical drift is legitimate via absolute hybrid verification
-    pub async fn verify_memory_vector(&self, sig: &HybridSignature, _data: &[f32]) -> bool {
+    pub async fn verify_memory_vector(&self, _sig: &HybridSignature, _data: &[f32]) -> bool {
         // Sequence of Verifications preventing malicious vector injection 
         // 1. Classical Verification (Ed25519 validity)
         // 2. Quantum Verification (ML-DSA / Kyber validity)

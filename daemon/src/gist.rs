@@ -8,12 +8,15 @@ pub const SURPRISE_THRESHOLD: f32 = 0.05; // MIRAS Learning Rate Threshold
 pub struct GistInjector {
     /// The 1536-dimensional float32 vector acting as the "1-Token" parametric state
     pub parametric_delta: Arc<RwLock<Vec<f32>>>,
+    pub visual_cortex: crate::visual_encoder::VisualGistEncoder,
 }
 
 impl GistInjector {
     pub fn new() -> Self {
         Self {
             parametric_delta: Arc::new(RwLock::new(vec![0.0; GIST_VECTOR_DIM])),
+            visual_cortex: crate::visual_encoder::VisualGistEncoder::new()
+                .expect("Failed to initialize Visual Cortex (CLIP/SigLIP bridge). section 311"),
         }
     }
 
@@ -42,6 +45,18 @@ impl GistInjector {
         }
 
         true
+    }
+
+    /// Autonomous Spatial Knowledge Ingestion.
+    /// Turns a visual leaf (image) into a parametric Spatial Gist.
+    pub async fn inject_visual_knowledge(&self, image_path: &std::path::Path) -> Result<bool, String> {
+        let visual_vector = self.visual_cortex.encode_image(image_path)
+            .map_err(|e| format!("Visual Cortex hardware failure: section 314 {}", e))?;
+        
+        let new_info: [f32; GIST_VECTOR_DIM] = visual_vector.try_into()
+            .map_err(|_| "Visual vector dimension mismatch (Expected 1536). section 314")?;
+            
+        Ok(self.inject_knowledge(&new_info).await)
     }
 
     /// Interface directly with vLLM (Inference Engine) to perform native FP8 KV-Cache Quantised Injection

@@ -1,6 +1,6 @@
 /// Neural Math Engine for Holographic Reduced Representations (HRR) and Surprise Analysis
 /// Part of the .aim Sentient Singularity (Phase 6)
-use std::f32::consts::PI;
+// Removed unused PI constant
 
 pub const VECTOR_DIM: usize = 1536;
 

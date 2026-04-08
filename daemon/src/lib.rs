@@ -7,11 +7,11 @@ pub mod watcher;
 pub mod chain;
 pub mod watermark;
 pub mod neural_math;
+pub mod visual_encoder;
 
-/// The Cognitive Kernel represents the VFS daemon bridging .aim files and the system.
 pub struct CognitiveKernel {
     pub runtime_state: vfs_state::VfsState,
-    pub securityLayer: crypto::SecurityLayer,
+    pub security_layer: crypto::SecurityLayer,
     pub shadow_watcher: watcher::ShadowWatcher,
     pub chain_vault: chain::QuantumChain,
     pub safety_watchdog: watermark::SoftBindingWatchdog,
@@ -21,7 +21,7 @@ impl CognitiveKernel {
     pub fn new() -> Self {
         Self {
             runtime_state: vfs_state::VfsState::new(),
-            securityLayer: crypto::SecurityLayer::new(),
+            security_layer: crypto::SecurityLayer::new(),
             shadow_watcher: watcher::ShadowWatcher::new(),
             chain_vault: chain::QuantumChain::new(),
             safety_watchdog: watermark::SoftBindingWatchdog::new(),

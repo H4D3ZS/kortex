@@ -4,7 +4,10 @@ members = [
     "vfs_layer",
     "neuraldrive/src-tauri",
     "aim-proxy",
-    "libaim",
-    "vscodium-rust/src-tauri"
+    "libaim"
 ]
 resolver = "2"
+
+[patch.crates-io]
+rand = { git = "https://github.com/rust-random/rand", tag = "0.8.5" }
+half = { git = "https://github.com/starkat99/half-rs", tag = "v2.4.1" }
