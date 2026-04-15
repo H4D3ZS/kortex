@@ -4,7 +4,9 @@ members = [
     "vfs_layer",
     "neuraldrive/src-tauri",
     "aim-proxy",
-    "libaim"
+    "libaim",
+    "harness",
+    "tui"
 ]
 resolver = "2"
 
