@@ -3,10 +3,24 @@
 ![License: AGPL-v3](https://img.shields.io/badge/License-AGPL_v3-red.svg)
 ![Build: Rust 1.80+](https://img.shields.io/badge/Rust-1.80%2B-orange.svg)
 ![Security: Post-Quantum](https://img.shields.io/badge/Security-Post--Quantum-green.svg)
+![AMD Cloud: MI300X](https://img.shields.io/badge/AMD_Cloud-MI300X-red.svg)
 
-Welcome to the future of context-aware, zero-token cost AI development. 
+Welcome to the future of context-aware, zero-token cost AI development.
 
-The `.aim` Neural VFS solves the AI "Context Crisis" by compressing massive project histories into a single **Parametric Gist Token**. This repository contains the Next-Gen VFS daemon, Tauri-based frontend, and Post-Quantum hybrid cryptographic components required to keep the system natively interoperable with Cursor, Claude, and traditional OS file boundaries.
+The `.aim` Neural VFS solves the AI "Context Crisis" by compressing massive project histories into a single **Parametric Gist Token**. This repository contains the Next-Gen VFS daemon, Tauri-based frontend, Post-Quantum hybrid cryptographic components, and **AMD ROCm Cloud-Burst** integration for MI300X GPU acceleration.
+
+## 🏆 AMD AI Hackathon 2025 Submission
+
+**KORTEX** is an autonomous AI development environment featuring:
+- **Neural VFS**: 99.9% token cost reduction via .aim context compression
+- **AMD Cloud-Burst**: Hybrid local (Ollama) + cloud (MI300X) compute
+- **AIRI**: Sentient AI entity that autonomously fixes bugs
+- **iPhone Emulator**: Integrated validation for AI-written code
+
+📋 **Full Submission**: [HACKATHON_SUBMISSION.md](./HACKATHON_SUBMISSION.md)
+🔧 **AMD Integration**: [AMD_INTEGRATION.md](./AMD_INTEGRATION.md)
+
+---
 
 ## 🧠 Architecture: The Housekeeper & The Guard
 - **Daemon (`/daemon`)**: The **Cognitive Housekeeper**. Ingests file states, runs a memory garbage collector (time-decay), and exposes LLM prefix context blocks. Built in high-performance Rust.
