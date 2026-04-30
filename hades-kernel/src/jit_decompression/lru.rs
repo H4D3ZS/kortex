@@ -14,7 +14,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
@@ -181,8 +181,8 @@ impl LruEvictionQueue {
         let free = self.vram_free.load(Ordering::SeqCst);
         
         // Evict if usage exceeds cap or free space is too low
-        usage as u64 > self.policy.vram_cap_bytes || 
-        free as u64 < self.policy.min_free_vram_bytes
+        (usage as u64) > self.policy.vram_cap_bytes || 
+        (free as u64) < self.policy.min_free_vram_bytes
     }
 
     /// Evict the least recently used block

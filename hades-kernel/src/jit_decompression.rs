@@ -98,7 +98,7 @@ impl Default for JitDecompressionConfig {
 }
 
 /// Status of the JIT decompression engine
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum JitStatus {
     /// Engine idle, waiting for faults
     Idle,

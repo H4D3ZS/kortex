@@ -5,16 +5,20 @@
   "identifier": "com.aim.neuraldrive",
   "build": {
     "beforeDevCommand": "npm run dev",
-    "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:1420",
     "frontendDist": "../dist"
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
-        "title": "neuraldrive",
-        "width": 800,
-        "height": 600
+        "title": "NeuralDrive - Kortex",
+        "width": 1400,
+        "height": 900,
+        "resizable": true,
+        "fullscreen": false,
+        "center": true
       }
     ],
     "security": {

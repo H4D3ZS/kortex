@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use crate::AppState;
 
 pub async fn handle_manifest(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     Json(payload): Json<Value>,
 ) -> impl IntoResponse {
     let objective = payload.get("objective").and_then(|v| v.as_str()).unwrap_or("analyze architecture");

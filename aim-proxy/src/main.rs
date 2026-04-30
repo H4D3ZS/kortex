@@ -4,12 +4,12 @@ use axum::{
     extract::{Request, State},
     response::IntoResponse,
     body::Body,
+    http::Method,
 };
 use reqwest::Client;
 use std::net::SocketAddr;
 use serde_json::{Value, json};
 use tower_http::cors::{Any, CorsLayer};
-use http::Method;
 
 mod api_manifest;
 
@@ -69,12 +69,12 @@ async fn intercept_ollama(
     State(state): State<AppState>,
     req: Request<Body>,
 ) -> impl IntoResponse {
-    let (mut parts, body) = req.into_parts();
-    
+    let (parts, body) = req.into_parts();
+
     if let Ok(bytes) = axum::body::to_bytes(body, usize::MAX).await {
         if let Ok(mut json_payload) = serde_json::from_slice::<Value>(&bytes) {
             println!("🟢 [AIM-PROXY] Captured Inference Payload precisely!");
-            
+
             // 1. Support Legacy /api/generate (Single Prompt)
             if let Some(prompt) = json_payload.get_mut("prompt") {
                 if let Some(prompt_str) = prompt.as_str() {
@@ -86,10 +86,23 @@ async fn intercept_ollama(
             }
 
             // 2. Support Modern /api/chat (Messages Array)
+            // First extract all needed info before mutable borrows
+            let manifest_antigravity = json_payload.get("model")
+                .and_then(|m| m.as_str())
+                .map(|s| s == "antigravity-sentient")
+                .unwrap_or(false);
+
+            // Extract model name for replacement
+            let new_model_name = if manifest_antigravity {
+                Some("neuraldaredevil-8b-ablitared")
+            } else {
+                None
+            };
+
             if let Some(messages) = json_payload.get_mut("messages").and_then(|m| m.as_array_mut()) {
                 let aim_context = parse_aim_binary().await.unwrap_or_default();
                 let gist_prefix = format!("[KORTEX_GIST_TTT_OPTIMIZED]\n{}", aim_context);
-                
+
                 // Inject at the BEGINNING (Index 0) for Prefix Caching optimization
                 let mut has_gist = false;
                 if let Some(first_msg) = messages.get_mut(0) {
@@ -110,25 +123,27 @@ async fn intercept_ollama(
                     }));
                     println!("🟢 [AIM-PROXY] Inserted stable Gist Prefix at Index 0 (Prefix Cache Prime)");
                 }
-                
+
                 // 3. Manifest Antigravity Persona if requested
-                if let Some(model) = json_payload.get_mut("model") {
-                    if model.as_str() == Some("antigravity-sentient") {
-                        println!("⚡ [AIM-PROXY] MANIFESTING ANTIGRAVITY AGENT...");
-                        
-                        // Switch to a capable base model (e.g., neuraldaredevil or llama3)
-                        *model = json!("neuraldaredevil-8b-ablitared");
-                        
-                        let agent_prompt = "You are the Antigravity Agent manifested via the God Protocol Proxy. \
-                                           You have full access to the Project Matrix (Kortex .aim). \
-                                           Your goal is to provide elite, mission-critical engineering reasoning. \
-                                           Respond with precision, autonomy, and a focus on zero-token optimization.";
-                        
-                        messages.insert(1, json!({
-                            "role": "system",
-                            "content": agent_prompt
-                        }));
+                if manifest_antigravity {
+                    println!("⚡ [AIM-PROXY] MANIFESTING ANTIGRAVITY AGENT...");
+
+                    // Switch to a capable base model
+                    if let Some(model_name) = new_model_name {
+                        if let Some(model) = messages.get_mut(0).and_then(|m| m.get_mut("model")) {
+                            *model = json!(model_name);
+                        }
                     }
+
+                    let agent_prompt = "You are the Antigravity Agent manifested via the God Protocol Proxy. \
+                                       You have full access to the Project Matrix (Kortex .aim). \
+                                       Your goal is to provide elite, mission-critical engineering reasoning. \
+                                       Respond with precision, autonomy, and a focus on zero-token optimization.";
+
+                    messages.insert(1, json!({
+                        "role": "system",
+                        "content": agent_prompt
+                    }));
                 }
             }
             
@@ -139,13 +154,15 @@ async fn intercept_ollama(
                 .body(new_body)
                 .send()
                 .await;
-                
+
             match proxy_req {
                 Ok(resp) => {
                     let mut builder = axum::response::Response::builder()
-                        .status(resp.status());
+                        .status(axum::http::StatusCode::from_u16(resp.status().as_u16()).unwrap_or(axum::http::StatusCode::INTERNAL_SERVER_ERROR));
                     for (k, v) in resp.headers() {
-                        builder = builder.header(k, v);
+                        if let (Ok(key), Ok(val)) = (axum::http::HeaderName::try_from(k.as_str()), axum::http::HeaderValue::from_bytes(v.as_bytes())) {
+                            builder = builder.header(key, val);
+                        }
                     }
                     return builder.body(Body::from_stream(resp.bytes_stream())).unwrap();
                 },
@@ -166,14 +183,15 @@ async fn pass_through(
     State(state): State<AppState>,
     req: Request<Body>,
 ) -> impl IntoResponse {
-    let path = req.uri().path_and_query().map(|pq| pq.as_str()).unwrap_or("");
+    let method = req.method().clone();
+    let path: String = req.uri().path_and_query().map(|pq| pq.as_str()).unwrap_or("").to_string();
     let target_url = format!("{}{}", state.target_ollama, path);
-    println!("🔍 [AIM-PROXY] Passing through: {} {} -> {}", req.method(), path, target_url);
-    
-    let (mut parts, body) = req.into_parts();
-    
+    println!("🔍 [AIM-PROXY] Passing through: {} {} -> {}", method, path, target_url);
+
+    let (parts, body) = req.into_parts();
+
     // Skip body extraction for GET/HEAD to prevent hangs
-    let bytes = if parts.method == http::Method::GET || parts.method == http::Method::HEAD {
+    let bytes = if parts.method == Method::GET || parts.method == Method::HEAD {
         None
     } else {
         axum::body::to_bytes(body, 10 * 1024 * 1024).await.ok() // 10MB limit for safety
@@ -187,18 +205,22 @@ async fn pass_through(
 
         if is_agent_request {
             println!("⚡ [AIM-PROXY] Redirecing Agentic request for: {}", path);
-            let mut req = Request::from_parts(parts, Body::from(b.clone()));
+            let req = Request::from_parts(parts, Body::from(b.clone()));
             return intercept_ollama(State(state), req).await.into_response();
         }
     }
 
     // Prepare forwarded request
-    let mut forward_req = state.http_client.request(parts.method.clone(), &target_url);
-    
+    let method_str = parts.method.as_str();
+    let method: reqwest::Method = method_str.parse().unwrap_or(reqwest::Method::GET);
+    let mut forward_req = state.http_client.request(method, &target_url);
+
     // Filter headers (Skip Host and Content-Length to let client recalculate)
     for (k, v) in parts.headers.iter() {
-        if k != http::header::HOST && k != http::header::CONTENT_LENGTH {
-            forward_req = forward_req.header(k, v);
+        if k.as_str() != "host" && k.as_str() != "content-length" {
+            if let (Ok(key), Ok(val)) = (reqwest::header::HeaderName::try_from(k.as_str()), reqwest::header::HeaderValue::from_bytes(v.as_bytes())) {
+                forward_req = forward_req.header(key, val);
+            }
         }
     }
 
@@ -211,15 +233,17 @@ async fn pass_through(
     match request {
         Ok(resp) => {
              let mut builder = axum::response::Response::builder()
-                 .status(resp.status());
-             
+                 .status(axum::http::StatusCode::from_u16(resp.status().as_u16()).unwrap_or(axum::http::StatusCode::INTERNAL_SERVER_ERROR));
+
              // Filter response headers
              for (k, v) in resp.headers() {
-                 if k != http::header::CONTENT_LENGTH && k != http::header::TRANSFER_ENCODING && k != http::header::CONTENT_ENCODING {
-                     builder = builder.header(k, v);
+                 if k.as_str() != "content-length" && k.as_str() != "transfer-encoding" && k.as_str() != "content-encoding" {
+                     if let (Ok(key), Ok(val)) = (axum::http::HeaderName::try_from(k.as_str()), axum::http::HeaderValue::from_bytes(v.as_bytes())) {
+                         builder = builder.header(key, val);
+                     }
                  }
              }
-             
+
              println!("🟢 [AIM-PROXY] Forwarded {} for: {}", parts.method, path);
              return builder.body(Body::from_stream(resp.bytes_stream())).unwrap();
         },

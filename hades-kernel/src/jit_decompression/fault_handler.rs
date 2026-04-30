@@ -30,11 +30,11 @@
 //! ```
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::{mpsc, Mutex, RwLock};
-use tracing::{debug, info, warn, error};
+use tracing::{info, warn, error};
 
 use crate::thermal::ThermalGovernor;
 use super::semantic_map::LimbicIndex;

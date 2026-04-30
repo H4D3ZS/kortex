@@ -34,6 +34,7 @@ pub const SEAL_SIZE: usize = SHA3_256_SIZE + ML_DSA_SIG_SIZE;
 /// Quantum seal for .aim drives
 /// 
 /// Combines classical and post-quantum signatures for hybrid security
+#[derive(Clone)]
 pub struct QuantumSeal {
     /// SHA3-256 integrity hash
     integrity_hash: [u8; SHA3_256_SIZE],

@@ -13,18 +13,18 @@
 
 #[cfg(target_os = "linux")]
 use io_uring::{IoUring, IoUringProbe};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::ptr::NonNull;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU32, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::{mpsc, Mutex, RwLock};
-use tracing::{debug, error, info, warn};
+use tokio::sync::RwLock;
+use tracing::{debug, info, warn};
 
 use crate::memory::RaiiBuffer;
 use crate::thermal::ThermalGovernor;
 use super::fault_handler::InflationRequest;
-use super::{JitMetrics, JitStatus};
+use super::{JitMetrics, JitStatus, JitErrorCode};
 
 /// Size of the VRAM scratchpad buffer (default: 512MB)
 pub const DEFAULT_SCRATCHPAD_SIZE: usize = 512 * 1024 * 1024;
@@ -240,7 +240,7 @@ impl InflationEngine {
             #[cfg(target_os = "linux")]
             io_uring,
             use_io_uring,
-            status: AtomicU32::new(JitStatus::Idle as u32),
+            status: AtomicU32::new(0),  // JitStatus::Idle = 0
             current_cluster: AtomicU32::new(u32::MAX),
             metrics: Arc::new(RwLock::new(JitMetrics::default())),
             enabled: AtomicBool::new(true),
@@ -267,40 +267,40 @@ impl InflationEngine {
             let mut metrics = self.metrics.write().await;
             metrics.record_thermal_throttle();
         }
-        
+
         // Check scratchpad space
         let file_size = std::fs::metadata(file_path)
             .map(|m| m.len() as usize)
             .unwrap_or(0);
-        
+
         if self.scratchpad.available() < file_size {
             warn!("Scratchpad full, eviction needed");
-            self.status.store(JitStatus::Evicting { bytes_freed: 0 } as u32, Ordering::SeqCst);
+            self.status.store(3, Ordering::SeqCst);  // JitStatus::Evicting
             // In production, trigger LRU eviction here
         }
-        
+
         // Set status
-        self.status.store(JitStatus::Inflating { cluster_id: request.cluster_id } as u32, Ordering::SeqCst);
+        self.status.store(1, Ordering::SeqCst);  // JitStatus::Inflating
         self.current_cluster.store(request.cluster_id, Ordering::SeqCst);
-        
+
         // Allocate scratchpad region
         let vram_offset = self.scratchpad.allocate(file_size)
             .ok_or(JitInflationError::ScratchpadFull)?;
-        
+
         // Perform zero-copy read
         let bytes_read = self.zero_copy_read(file_path, vram_offset, file_size).await?;
-        
+
         let latency_us = start.elapsed().as_micros() as u64;
-        
+
         // Update metrics
         {
             let mut metrics = self.metrics.write().await;
             metrics.record_inflation(bytes_read, latency_us);
             metrics.scratchpad_usage_bytes = self.scratchpad.usage() as u64;
         }
-        
+
         // Set status back to idle
-        self.status.store(JitStatus::Idle as u32, Ordering::SeqCst);
+        self.status.store(0, Ordering::SeqCst);  // JitStatus::Idle
         self.current_cluster.store(u32::MAX, Ordering::SeqCst);
         
         Ok(InflationResult {

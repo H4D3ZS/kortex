@@ -1,6 +1,5 @@
 use tauri::{Emitter, Manager};
-use std::time::Duration;
-use notify::{Watcher, RecursiveMode, RecommendedWatcher};
+use notify::{Watcher, RecursiveMode};
 use std::sync::mpsc::channel;
 use walkdir::WalkDir;
 

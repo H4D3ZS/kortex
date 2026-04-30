@@ -13,12 +13,12 @@
 //! - **TTT Gradient Updates**: Continuous learning from access patterns
 //! - **Merkle-DAG Anchors**: Cryptographic links to inflated blocks
 
-use anyhow::{Result, Context};
+use anyhow::Result;
 use std::path::Path;
 use std::ptr::NonNull;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
-use tracing::{debug, info, warn};
+use tracing::debug;
 
 use crate::memory::RaiiBuffer;
 use crate::crypto::QuantumSeal;
@@ -33,7 +33,6 @@ pub const GIST_DIM: usize = 1536;
 ///
 /// This vector remains resident in VRAM at all times and provides
 /// semantic navigation for the entire codebase.
-#[derive(Clone)]
 pub struct ParametricGist {
     /// The 1536-dimensional gist vector
     data: [f32; GIST_DIM],
@@ -223,7 +222,7 @@ impl ParametricGist {
     /// Verify the gist seal
     pub fn verify_seal(&self) -> Result<bool> {
         match &self.seal {
-            Some(seal) => Ok(seal.verify(&self.as_bytes())),
+            Some(seal) => seal.verify(&self.as_bytes()),
             None => Ok(true),  // No seal = no verification needed
         }
     }
@@ -389,7 +388,7 @@ impl SemanticMap {
     /// Seal the entire semantic map
     pub fn seal(&mut self) -> Result<QuantumSeal> {
         self.gist.seal()?;
-        Ok(self.gist.seal.as_ref().unwrap().clone())
+        Ok(self.gist.seal.clone().unwrap())
     }
 }
 

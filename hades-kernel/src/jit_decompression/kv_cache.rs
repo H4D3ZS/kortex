@@ -24,11 +24,11 @@
 //! └───────────────────┘
 //! ```
 
-use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
-use tracing::{debug, error, info};
+use std::ffi::c_void;
+use tracing::{debug, info};
 
 use super::semantic_map::ParametricGist;
 
@@ -83,7 +83,7 @@ impl NeuralPointer {
 }
 
 /// Injected block in KV-cache
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct InjectedBlock {
     /// Neural pointer
     pub pointer: NeuralPointer,
@@ -113,7 +113,7 @@ impl InjectedBlock {
     }
 
     /// Record access
-    pub fn record_access(&self) {
+    pub fn record_access(&mut self) {
         self.access_count.fetch_add(1, Ordering::SeqCst);
         self.last_access = Instant::now();
     }
@@ -162,7 +162,7 @@ impl KVCacheInjector {
         &self,
         pointer: NeuralPointer,
         token_count: u32,
-    ) -> Result<InjectedBlock, KVCacheError> {
+    ) -> Result<(), KVCacheError> {
         if !self.enabled.load(Ordering::SeqCst) {
             return Err(KVCacheError::InjectorDisabled);
         }
@@ -176,36 +176,48 @@ impl KVCacheInjector {
 
         // Allocate KV slots
         let kv_slots: Vec<u32> = (current_pos as u32..(current_pos + token_count as usize) as u32).collect();
-        
+        let kv_start = kv_slots.first().copied().unwrap_or(0);
+        let kv_end = kv_slots.last().copied().unwrap_or(0);
+        let cluster_id = pointer.cluster_id;
+
         // Create injected block
         let block = InjectedBlock::new(pointer, kv_slots, token_count);
-        
+
         // Add to blocks list
         {
             let mut blocks = self.blocks.write().await;
-            blocks.push(block.clone());
+            blocks.push(block);
         }
-        
+
         // Update position
         self.kv_position.fetch_add(token_count as usize, Ordering::SeqCst);
         self.total_injections.fetch_add(1, Ordering::SeqCst);
         self.total_tokens_injected.fetch_add(token_count as u64, Ordering::SeqCst);
-        
+
         info!(
             "Injected block: cluster {}, {} tokens, KV slots {}-{}",
-            block.pointer.cluster_id,
+            cluster_id,
             token_count,
-            kv_slots.first().unwrap_or(&0),
-            kv_slots.last().unwrap_or(&0)
+            kv_start,
+            kv_end
         );
-        
-        Ok(block)
+
+        Ok(())
     }
 
     /// Get all injected blocks
     pub async fn get_blocks(&self) -> Vec<InjectedBlock> {
         let blocks = self.blocks.read().await;
-        blocks.clone()
+        blocks.iter().map(|b| {
+            InjectedBlock {
+                pointer: b.pointer.clone(),
+                kv_slots: b.kv_slots.clone(),
+                token_count: b.token_count,
+                injected_at: b.injected_at,
+                access_count: AtomicU64::new(b.access_count()),
+                last_access: b.last_access,
+            }
+        }).collect()
     }
 
     /// Remove a block by cluster ID
