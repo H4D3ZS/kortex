@@ -6,7 +6,9 @@ members = [
     "aim-proxy",
     "libaim",
     "harness",
-    "tui"
+    "tui",
+    "hades-kernel",
+    "hades-bridge"
 ]
 resolver = "2"
 
