@@ -55,23 +55,37 @@ Kortex relies on **Holographic Reduced Representations (HRR)** and **Vector Symb
 
 ### The Cascade Decay Problem (Why Serial Paging Fails)
 If script chunks are bound consecutively in a sequential circular convolution loop:
+
 $$\mathbf{v}_N = \mathbf{v}_0 \circledast \mathbf{c}_1 \circledast \mathbf{c}_2 \dots \circledast \mathbf{c}_N$$
+
 The spectral frequency components undergo exponential phase polarization. Under repeated convolving without continuous re-normalization, the signal vector collapses rapidly to zero:
+
 $$\lim_{N \to \infty} \mathbb{E}\left[ \langle \mathbf{v}_N, \mathbf{c}_i \rangle \right] = 0, \quad \forall i \in \{1,\dots,N\}$$
+
 This turns the persistent index vector into high-dimensional isotropic white noise, rendering directory traversal and semantic search mathematically impossible.
 
 ### The Kortex Solution: Spherical Path-Key Superposition
 Kortex solves this signal decay through **Key-Value Superposition Binding**:
+
 1. For each script file path string, we generate a deterministic **Path Key** mapped to a high-frequency sine coordinate:
+
    $$k_i = \sin\left( \text{Byte}_{(i \pmod L)} \cdot \sin(i) \right)$$
-2. The key is spherically projected onto the unit sphere and convolved with the target chunk's LLM embedding:
+
+   where $L$ is the character length of the path.
+
+2. The key is spherically projected onto the unit sphere ($\mathbf{k}_{\text{path}} = \mathbf{k} / \|\mathbf{k}\|_2$) and convolved with the target chunk's LLM embedding:
+
    $$\mathbf{v}_{\text{bound}} = \mathbf{k}_{\text{path}} \circledast \mathbf{c}_{\text{embedding}}$$
+
 3. The bound pairs are aggregated using **linear vector superposition** combined with **Test-Time Training (TTT)** weight blending:
+
    $$\mathbf{v}_{\text{global}}^{(k)} = (1-\alpha) \mathbf{v}_{\text{global}}^{(k-1)} + \alpha \mathbf{v}_{\text{bound}}$$
 
 By performing circular correlation with a target path key, Kortex recovers the exact script context cleanly without decay:
+
 $$\mathbf{b}'_m = \mathbf{v}_{\text{global}} \oplus \mathbf{a}_m \approx \mathbf{b}_m$$
-Even with $30,000$ files Superposed inside the single 6KB vector, the **Signal-to-Noise Ratio (SNR)** remains extremely high ($\text{SNR} \gg 1$), enabling perfect $O(1)$ search and discovery.
+
+Even with 30,000 files superposed inside the single 6KB vector, the **Signal-to-Noise Ratio (SNR)** remains extremely high ($\text{SNR} \approx d / (k-1) \gg 1$), enabling perfect $O(1)$ search and discovery.
 
 ---
 
