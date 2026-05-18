@@ -7,7 +7,7 @@
 qs "Working on BL sign extension fix"
 
 # OR full command
-powershell -ExecutionPolicy Bypass -File "C:\Users\HADES\Desktop\vscodium-rust\kortex\save.ps1" "Your message"
+powershell -ExecutionPolicy Bypass -File "C:\Users\HADES\Desktop\CodeSigil\kortex\save.ps1" "Your message"
 
 # Recover after shutdown
 powershell -ExecutionPolicy Bypass -File "C:\Users\HADES\.qwen\sessions\latest\recover.ps1"
@@ -20,7 +20,7 @@ notepad "C:\Users\HADES\.qwen\sessions\latest\context.md"
 
 | Type | Location |
 |------|----------|
-| Save script | `C:\Users\HADES\Desktop\vscodium-rust\kortex\save.ps1` |
+| Save script | `C:\Users\HADES\Desktop\CodeSigil\kortex\save.ps1` |
 | Saved sessions | `C:\Users\HADES\.qwen\sessions\` |
 | Latest context | `C:\Users\HADES\.qwen\sessions\latest\context.md` |
 | Recovery script | `C:\Users\HADES\.qwen\sessions\latest\recover.ps1` |

@@ -91,7 +91,7 @@ Traditional RAG: ~15,000 tokens @ $0.03 = $0.45/query
 # Launch NeuralDrive
 .\neuraldrive.exe
 
-# Mount vscodium-rust project (5,000+ files)
+# Mount CodeSigil project (5,000+ files)
 # Watch 3D neural graph populate in <2 seconds
 ```
 

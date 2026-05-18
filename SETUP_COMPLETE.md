@@ -40,7 +40,7 @@ Location: `kortex/target/release/`
 ollama serve
 
 # Terminal 2: Start AIM Proxy
-cd C:\Users\HADES\Desktop\vscodium-rust\kortex
+cd C:\Users\HADES\Desktop\CodeSigil\kortex
 .\target\release\aim-proxy.exe
 
 # Terminal 3 (optional): Launch NeuralDrive GUI
@@ -95,7 +95,7 @@ The proxy will automatically inject compressed `.aim` context into every request
 ## Files Modified/Created
 
 ```
-C:\Users\HADES\Desktop\vscodium-rust\
+C:\Users\HADES\Desktop\CodeSigil\
 ├── .cursorrules (created)
 ├── CLAUDE.MD (updated - Section 0 added)
 └── kortex/

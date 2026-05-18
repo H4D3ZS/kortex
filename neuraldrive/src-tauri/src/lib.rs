@@ -158,19 +158,39 @@ async fn build_aim_binary(project_path: String) -> Result<String, String> {
                                 }
                             }
 
-                            // 1. TTT Gradient Update: Evolutionary Parametric Blending
+                            // 1. TTT Gradient Update: Evolutionary Parametric Blending (Superposition)
+                            let mut ttt_blend = vec![0.0f32; 1536];
                             for i in 0..1536 {
-                                global_vector[i] = (global_vector[i] * 0.85) + (chunk_vec[i] * 0.15);
+                                ttt_blend[i] = (global_vector[i] * 0.85) + (chunk_vec[i] * 0.15);
                             }
 
-                            // 2. Holographic reduced representation (HRR): Concepts are smeared via Circular Convolution
-                            // (Simulating the 'Hologram' effect by binding chunk concepts into a global state)
-                            let current_state_fixed: [f32; 1536] = global_vector.clone().try_into().unwrap_or([0.0; 1536]);
-                            let bound_state = daemon::neural_math::circular_convolution(&current_state_fixed, &chunk_vec);
-                            
-                            // Re-normalize to prevent convolution explosion
+                            // 2. Holographic Reduced Representation (HRR): Bind Chunk to Path-Key
+                            // We generate a deterministic Key Vector for the path to prevent signal destruction
+                            let mut path_key = [0.0f32; 1536];
+                            let path_bytes = path_str.as_bytes();
                             for i in 0..1536 {
-                                global_vector[i] = bound_state[i];
+                                let val = if !path_bytes.is_empty() {
+                                    let char_val = path_bytes[i % path_bytes.len()] as f32;
+                                    (char_val * (i as f32).sin()).sin()
+                                } else {
+                                    (i as f32).sin()
+                                };
+                                path_key[i] = val;
+                            }
+                            
+                            let key_mag = (path_key.iter().map(|x| x * x).sum::<f32>()).sqrt();
+                            if key_mag > 1e-6 {
+                                for val in path_key.iter_mut() {
+                                    *val /= key_mag;
+                                }
+                            }
+
+                            // Bind the path key to its content vector value via circular convolution
+                            let bound_state = daemon::neural_math::circular_convolution(&path_key, &chunk_vec);
+                            
+                            // Superpose (Add) the bound key-value association cleanly into context
+                            for i in 0..1536 {
+                                global_vector[i] = ttt_blend[i] + bound_state[i] * 0.10;
                             }
 
                             total_chunks += 1;

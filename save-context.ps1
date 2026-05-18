@@ -7,8 +7,8 @@ param(
 )
 
 $Timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
-$SavepointDir = "C:\Users\HADES\Desktop\vscodium-rust\kortex\.savepoints"
-$KortexRoot = "C:\Users\HADES\Desktop\vscodium-rust\kortex"
+$SavepointDir = "C:\Users\HADES\Desktop\CodeSigil\kortex\.savepoints"
+$KortexRoot = "C:\Users\HADES\Desktop\CodeSigil\kortex"
 
 # Create savepoint directory if not exists
 if (-not (Test-Path $SavepointDir)) {

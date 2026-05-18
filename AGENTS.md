@@ -7,7 +7,7 @@ This project uses **Kortex** for token-efficient AI development. The system comp
 ## Infrastructure Status
 
 ### Built Components ✅
-Location: `C:\Users\HADES\Desktop\vscodium-rust\kortex\target\release\`
+Location: `C:\Users\HADES\Desktop\CodeSigil\kortex\target\release\`
 
 | Executable | Port | Purpose |
 |------------|------|---------|
@@ -58,19 +58,19 @@ L3: .aim binary (long-term semantic code understanding)
 ## Paths to Remember
 
 ### Kortex Root
-`C:\Users\HADES\Desktop\vscodium-rust\kortex\`
+`C:\Users\HADES\Desktop\CodeSigil\kortex\`
 
 ### AIM Memory Search Paths
 ```
 C:\Users\HADES\Desktop\kortex\.aim\memory.aim
-C:\Users\HADES\Desktop\vscodium-rust\.aim\memory.aim
+C:\Users\HADES\Desktop\CodeSigil\.aim\memory.aim
 .<project>\.aim\memory.aim
 ```
 
 ### Executables
 ```
-C:\Users\HADES\Desktop\vscodium-rust\kortex\target\release\aim-proxy.exe
-C:\Users\HADES\Desktop\vscodium-rust\kortex\target\release\neuraldrive.exe
+C:\Users\HADES\Desktop\CodeSigil\kortex\target\release\aim-proxy.exe
+C:\Users\HADES\Desktop\CodeSigil\kortex\target\release\neuraldrive.exe
 ```
 
 ## Quick Start Sequence
@@ -80,7 +80,7 @@ C:\Users\HADES\Desktop\vscodium-rust\kortex\target\release\neuraldrive.exe
 ollama serve
 
 # 2. Start AIM Proxy (in background)
-cd C:\Users\HADES\Desktop\vscodium-rust\kortex
+cd C:\Users\HADES\Desktop\CodeSigil\kortex
 .\target\release\aim-proxy.exe
 
 # 3. Configure AI client to use proxy

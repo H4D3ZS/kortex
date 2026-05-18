@@ -6,7 +6,7 @@ Write-Host "`n══════════════════════
 Write-Host "        STARTING KORTEX ZERO-TOKEN ENVIRONMENT             " -ForegroundColor Cyan
 Write-Host "═══════════════════════════════════════════════════════════`n" -ForegroundColor Cyan
 
-$KortexRoot = "C:\Users\HADES\Desktop\vscodium-rust\kortex"
+$KortexRoot = "C:\Users\HADES\Desktop\CodeSigil\kortex"
 $ProxyPath = "$KortexRoot\target\release\aim-proxy.exe"
 $OllamaPath = "ollama"
 

@@ -28,7 +28,7 @@ Cost: ~1 token instead of thousands
 ### Option 1: Automatic Startup
 ```powershell
 # Run this once before we start coding
-cd C:\Users\HADES\Desktop\vscodium-rust\kortex
+cd C:\Users\HADES\Desktop\CodeSigil\kortex
 .\start-kortex.ps1
 ```
 
@@ -43,7 +43,7 @@ This script:
 ollama serve
 
 # Terminal 2: Start AIM Proxy
-cd C:\Users\HADES\Desktop\vscodium-rust\kortex
+cd C:\Users\HADES\Desktop\CodeSigil\kortex
 .\target\release\aim-proxy.exe
 ```
 
@@ -96,7 +96,7 @@ Already configured in `.qwen/settings.json`:
 I check these paths for `.aim` context files:
 ```
 C:\Users\HADES\Desktop\kortex\.aim\memory.aim
-C:\Users\HADES\Desktop\vscodium-rust\.aim\memory.aim
+C:\Users\HADES\Desktop\CodeSigil\.aim\memory.aim
 .<project>\.aim\memory.aim
 ```
 
@@ -163,7 +163,7 @@ ollama serve
 
 **Before our coding sessions:**
 ```powershell
-cd C:\Users\HADES\Desktop\vscodium-rust\kortex
+cd C:\Users\HADES\Desktop\CodeSigil\kortex
 .\start-kortex.ps1
 ```
 

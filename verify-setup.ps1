@@ -5,7 +5,7 @@ Write-Host "══════════════════════�
 Write-Host "           KORTEX ZERO-TOKEN SETUP VERIFICATION            " -ForegroundColor Cyan
 Write-Host "═══════════════════════════════════════════════════════════" -ForegroundColor Cyan
 
-$KortexRoot = "C:\Users\HADES\Desktop\vscodium-rust\kortex"
+$KortexRoot = "C:\Users\HADES\Desktop\CodeSigil\kortex"
 $ReleaseDir = "$KortexRoot\target\release"
 
 # Check executables

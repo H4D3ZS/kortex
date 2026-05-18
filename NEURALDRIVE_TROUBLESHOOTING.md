@@ -11,7 +11,7 @@
 
 #### 1. Check if Frontend is Built
 ```powershell
-cd C:\Users\HADES\Desktop\vscodium-rust\kortex\neuraldrive
+cd C:\Users\HADES\Desktop\CodeSigil\kortex\neuraldrive
 npm run build
 ```
 
@@ -22,7 +22,7 @@ Look for:
 
 #### 2. Rebuild Everything
 ```powershell
-cd C:\Users\HADES\Desktop\vscodium-rust\kortex
+cd C:\Users\HADES\Desktop\CodeSigil\kortex
 cargo clean
 cargo build --release
 ```
@@ -30,7 +30,7 @@ cargo build --release
 #### 3. Launch with Console Logging
 Run from PowerShell to see errors:
 ```powershell
-& "C:\Users\HADES\Desktop\vscodium-rust\kortex\target\release\neuraldrive.exe"
+& "C:\Users\HADES\Desktop\CodeSigil\kortex\target\release\neuraldrive.exe"
 ```
 
 #### 4. Check Ollama Connection
@@ -81,27 +81,27 @@ winget install Microsoft.VCRedist.2015+.x64
 
 ```powershell
 # Check if exe exists
-Test-Path "C:\Users\HADES\Desktop\vscodium-rust\kortex\target\release\neuraldrive.exe"
+Test-Path "C:\Users\HADES\Desktop\CodeSigil\kortex\target\release\neuraldrive.exe"
 
 # Check file size (should be ~14MB)
-Get-Item "C:\Users\HADES\Desktop\vscodium-rust\kortex\target\release\neuraldrive.exe" | Select-Object Name, Length
+Get-Item "C:\Users\HADES\Desktop\CodeSigil\kortex\target\release\neuraldrive.exe" | Select-Object Name, Length
 
 # Run diagnostic script
-& "C:\Users\HADES\Desktop\vscodium-rust\kortex\neuraldrive\diagnose.ps1"
+& "C:\Users\HADES\Desktop\CodeSigil\kortex\neuraldrive\diagnose.ps1"
 ```
 
 ### Manual Testing
 
 1. **Test Frontend Alone** (dev mode):
 ```powershell
-cd C:\Users\HADES\Desktop\vscodium-rust\kortex\neuraldrive
+cd C:\Users\HADES\Desktop\CodeSigil\kortex\neuraldrive
 npm run dev
 # Opens at http://localhost:1420
 ```
 
 2. **Test Backend Only**:
 ```powershell
-cd C:\Users\HADES\Desktop\vscodium-rust\kortex
+cd C:\Users\HADES\Desktop\CodeSigil\kortex
 cargo test
 ```
 
@@ -121,13 +121,13 @@ If none of the above works:
 
 1. Run diagnostic and save output:
 ```powershell
-& "C:\Users\HADES\Desktop\vscodium-rust\kortex\neuraldrive\diagnose.ps1" > diagnosis.txt
+& "C:\Users\HADES\Desktop\CodeSigil\kortex\neuraldrive\diagnose.ps1" > diagnosis.txt
 ```
 
 2. Check for Rust panics:
 ```powershell
 $env:RUST_BACKTRACE="full"
-& "C:\Users\HADES\Desktop\vscodium-rust\kortex\target\release\neuraldrive.exe"
+& "C:\Users\HADES\Desktop\CodeSigil\kortex\target\release\neuraldrive.exe"
 ```
 
 3. Report issue with:
@@ -141,10 +141,10 @@ $env:RUST_BACKTRACE="full"
 ## Quick Launch Command
 
 ```powershell
-& "C:\Users\HADES\Desktop\vscodium-rust\kortex\target\release\neuraldrive.exe"
+& "C:\Users\HADES\Desktop\CodeSigil\kortex\target\release\neuraldrive.exe"
 ```
 
 Or use the launcher script:
 ```powershell
-& "C:\Users\HADES\Desktop\vscodium-rust\kortex\launch-neuraldrive.ps1"
+& "C:\Users\HADES\Desktop\CodeSigil\kortex\launch-neuraldrive.ps1"
 ```

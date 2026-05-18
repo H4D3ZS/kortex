@@ -1,7 +1,7 @@
 ﻿#!/usr/bin/env pwsh
 # Launch NeuralDrive
 
-$ExePath = "C:\Users\HADES\Desktop\vscodium-rust\kortex\target\release\neuraldrive.exe"
+$ExePath = "C:\Users\HADES\Desktop\CodeSigil\kortex\target\release\neuraldrive.exe"
 
 if (Test-Path $ExePath) {
     Write-Host "`n🚀 Launching NeuralDrive...`n" -ForegroundColor Green
@@ -9,7 +9,7 @@ if (Test-Path $ExePath) {
 } else {
     Write-Host "`n❌ neuraldrive.exe not found!`n" -ForegroundColor Red
     Write-Host "Building..." -ForegroundColor Yellow
-    cd "C:\Users\HADES\Desktop\vscodium-rust\kortex"
+    cd "C:\Users\HADES\Desktop\CodeSigil\kortex"
     cargo build --release
     if ($LASTEXITCODE -eq 0) {
         Write-Host "`n🚀 Launching NeuralDrive...`n" -ForegroundColor Green

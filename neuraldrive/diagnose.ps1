@@ -5,8 +5,8 @@ Write-Host "`n══════════════════════
 Write-Host "           NEURALDRIVE DIAGNOSTIC TOOL                     " -ForegroundColor Cyan
 Write-Host "═══════════════════════════════════════════════════════════`n" -ForegroundColor Cyan
 
-$NeuralDriveRoot = "C:\Users\HADES\Desktop\vscodium-rust\kortex\neuraldrive"
-$WorkspaceRoot = "C:\Users\HADES\Desktop\vscodium-rust\kortex"
+$NeuralDriveRoot = "C:\Users\HADES\Desktop\CodeSigil\kortex\neuraldrive"
+$WorkspaceRoot = "C:\Users\HADES\Desktop\CodeSigil\kortex"
 $ExePath = "$WorkspaceRoot\target\release\neuraldrive.exe"
 $DistPath = "$NeuralDriveRoot\dist"
 

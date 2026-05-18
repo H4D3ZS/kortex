@@ -55,12 +55,12 @@ The built `dist/index.html` now correctly uses relative paths:
 
 ### Quick Launch
 ```powershell
-& "C:\Users\HADES\Desktop\vscodium-rust\kortex\target\release\neuraldrive.exe"
+& "C:\Users\HADES\Desktop\CodeSigil\kortex\target\release\neuraldrive.exe"
 ```
 
 ### Or use the launcher script
 ```powershell
-& "C:\Users\HADES\Desktop\vscodium-rust\kortex\launch-neuraldrive.ps1"
+& "C:\Users\HADES\Desktop\CodeSigil\kortex\launch-neuraldrive.ps1"
 ```
 
 ## Using NeuralDrive
@@ -79,12 +79,12 @@ Try these additional steps:
 ```powershell
 # Run with GPU debugging
 $env:RUST_BACKTRACE="full"
-& "C:\Users\HADES\Desktop\vscodium-rust\kortex\target\release\neuraldrive.exe"
+& "C:\Users\HADES\Desktop\CodeSigil\kortex\target\release\neuraldrive.exe"
 ```
 
 ### Clear and Rebuild
 ```powershell
-cd C:\Users\HADES\Desktop\vscodium-rust\kortex
+cd C:\Users\HADES\Desktop\CodeSigil\kortex
 cargo clean
 cd neuraldrive
 rm -rf dist node_modules
@@ -97,7 +97,7 @@ cargo build --release
 ### Check Console for Errors
 Run from PowerShell to see any runtime errors:
 ```powershell
-cd C:\Users\HADES\Desktop\vscodium-rust\kortex\target\release
+cd C:\Users\HADES\Desktop\CodeSigil\kortex\target\release
 .\neuraldrive.exe
 ```
 

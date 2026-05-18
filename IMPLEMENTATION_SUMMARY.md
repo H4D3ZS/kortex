@@ -102,7 +102,7 @@ kortex/
 
 ### Build KORTEX
 ```powershell
-cd C:\Users\HADES\Desktop\vscodium-rust\kortex
+cd C:\Users\HADES\Desktop\CodeSigil\kortex
 cargo build --release
 ```
 
