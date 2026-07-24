@@ -50,6 +50,7 @@
 
 pub mod catalog;
 pub mod chunk;
+pub mod delta;
 pub mod embed;
 #[cfg(feature = "http-embed")]
 pub mod embed_http;
@@ -65,6 +66,7 @@ pub use catalog::{
     INDEX_FILE, META_FILE,
 };
 pub use chunk::{chunk_source, ChunkConfig, SourceChunk};
+pub use delta::{DeltaLayer, LiveCatalog, LiveChunk};
 pub use embed::{cosine, Embedder, HashEmbedder};
 pub use error::AimError;
 pub use format::{Header, DEFAULT_BIT_WIDTH, DEFAULT_DIM};

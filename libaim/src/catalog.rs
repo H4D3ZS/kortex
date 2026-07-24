@@ -603,6 +603,17 @@ impl Catalog {
         crate::embed::HashEmbedder::with_idf(self.dim(), self.idf().to_vec())
     }
 
+    /// Line range and token estimate for a chunk, or `None` if the id
+    /// is not in this catalog.
+    ///
+    /// Exposed so an overlay ([`crate::delta::LiveCatalog`]) can build a
+    /// [`Hit`] for a base chunk without reaching into private state.
+    pub fn chunk_extent(&self, chunk_id: u64) -> Option<(u32, u32, u32)> {
+        self.record(chunk_id)
+            .ok()
+            .map(|r| (r.line_start, r.line_end, r.token_estimate))
+    }
+
     /// Workspace-relative path of a chunk.
     pub fn chunk_path(&self, chunk_id: u64) -> Result<&str, AimError> {
         let rec = self.record(chunk_id)?;

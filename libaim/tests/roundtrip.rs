@@ -10,7 +10,7 @@
 use std::path::{Path, PathBuf};
 
 use libaim::{
-    index_workspace, Catalog, Embedder, HashEmbedder, IndexOptions, RetrievalConfig,
+    index_workspace, Catalog, ChunkConfig, Embedder, HashEmbedder, IndexOptions, RetrievalConfig,
 };
 
 /// Embedding dimension used by these tests.
@@ -808,4 +808,177 @@ fn payload_compresses_the_chunk_text() {
         m.payload_bytes,
         fixed
     );
+}
+
+// ---------------------------------------------------------------------
+// Delta layer: keeping retrieval current between full rebuilds
+// ---------------------------------------------------------------------
+
+#[test]
+fn editing_a_file_stops_the_stale_version_being_retrieved() {
+    // The defect this closes: after an edit, the catalog still holds the
+    // old chunks, so retrieval hands the model text and line numbers
+    // that no longer exist — which reads exactly like a hallucination.
+    let (tmp, dir) = build_fixture("delta_stale");
+    let catalog = Catalog::open(&dir).unwrap();
+    let embedder = catalog.query_embedder();
+    let mut live = libaim::LiveCatalog::new(catalog);
+
+    let query = embedder.embed("apple_mbox drain inbox fifo").unwrap();
+    let cfg = RetrievalConfig {
+        fault_threshold: 0.0,
+        relative_floor: 0.0,
+        ..Default::default()
+    };
+
+    // Before the edit, the base catalog serves the original text.
+    let before = live.page_fault(&query, &cfg).unwrap();
+    assert!(
+        before.hits.iter().any(|h| h.text.contains("apple_mbox_drain_inbox")),
+        "fixture text missing from base retrieval"
+    );
+
+    // Rewrite the file, removing the function entirely.
+    let path = "hw/misc/apple_mbox.c";
+    let rewritten = "/* rewritten: the drain helper was removed */\n\
+                     static void apple_mbox_reset(AppleMboxState *s) { s->count = 0; }\n";
+    std::fs::write(tmp.path().join(path), rewritten).unwrap();
+    live.ingest_file(path, rewritten, &embedder, &ChunkConfig::default())
+        .unwrap();
+
+    let after = live.page_fault(&query, &cfg).unwrap();
+    for hit in &after.hits {
+        assert!(
+            !hit.text.contains("apple_mbox_drain_inbox"),
+            "stale text from {} still retrieved after the edit",
+            hit.path
+        );
+    }
+    assert!(
+        after.hits.iter().any(|h| h.path == path && h.text.contains("apple_mbox_reset")),
+        "the edited file's new content was not retrieved: {:?}",
+        after.hits.iter().map(|h| (&h.path, h.line_start)).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn delta_line_numbers_match_the_edited_file_on_disk() {
+    let (tmp, dir) = build_fixture("delta_lines");
+    let catalog = Catalog::open(&dir).unwrap();
+    let embedder = catalog.query_embedder();
+    let mut live = libaim::LiveCatalog::new(catalog);
+
+    let path = "hw/misc/apple_mbox.c";
+    let rewritten = (1..=40)
+        .map(|i| format!("int marker_{i}(void) {{ return {i}; }}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(tmp.path().join(path), &rewritten).unwrap();
+    live.ingest_file(path, &rewritten, &embedder, &ChunkConfig::default())
+        .unwrap();
+
+    let query = embedder.embed("marker_17 return value").unwrap();
+    let cfg = RetrievalConfig {
+        fault_threshold: 0.0,
+        relative_floor: 0.0,
+        ..Default::default()
+    };
+    let fault = live.page_fault(&query, &cfg).unwrap();
+
+    let on_disk: Vec<&str> = rewritten.lines().collect();
+    for hit in fault.hits.iter().filter(|h| h.path == path) {
+        // Citations must point at the file as it exists now.
+        assert!(hit.line_end as usize <= on_disk.len());
+        let expected = on_disk[hit.line_start as usize - 1];
+        let actual = hit.text.lines().next().unwrap_or("");
+        assert_eq!(expected, actual, "delta hit cites the wrong line");
+    }
+}
+
+#[test]
+fn deleting_a_file_removes_it_from_retrieval() {
+    let (_tmp, dir) = build_fixture("delta_delete");
+    let catalog = Catalog::open(&dir).unwrap();
+    let embedder = catalog.query_embedder();
+    let mut live = libaim::LiveCatalog::new(catalog);
+
+    let cfg = RetrievalConfig {
+        fault_threshold: 0.0,
+        relative_floor: 0.0,
+        ..Default::default()
+    };
+    let query = embedder.embed("pl011 write fifo read count").unwrap();
+
+    assert!(
+        live.page_fault(&query, &cfg)
+            .unwrap()
+            .hits
+            .iter()
+            .any(|h| h.path.contains("serial_pl011")),
+        "fixture file not retrievable before deletion"
+    );
+
+    live.delta_mut().remove_file("hw/char/serial_pl011.c");
+
+    assert!(
+        !live.page_fault(&query, &cfg)
+            .unwrap()
+            .hits
+            .iter()
+            .any(|h| h.path.contains("serial_pl011")),
+        "deleted file still retrieved"
+    );
+}
+
+#[test]
+fn unedited_files_still_come_from_the_base_catalog() {
+    // The delta must not shadow anything it was not asked to.
+    let (_tmp, dir) = build_fixture("delta_isolation");
+    let catalog = Catalog::open(&dir).unwrap();
+    let embedder = catalog.query_embedder();
+    let mut live = libaim::LiveCatalog::new(catalog);
+
+    live.ingest_file(
+        "hw/misc/apple_mbox.c",
+        "static void unrelated(void) {}\n",
+        &embedder,
+        &ChunkConfig::default(),
+    )
+    .unwrap();
+
+    let cfg = RetrievalConfig {
+        fault_threshold: 0.0,
+        relative_floor: 0.0,
+        ..Default::default()
+    };
+    let query = embedder.embed("translate xcodebuild clang arm64 apple ios").unwrap();
+    let fault = live.page_fault(&query, &cfg).unwrap();
+
+    assert!(
+        fault.hits.iter().any(|h| h.path.contains("shim.rs")),
+        "an untouched file stopped being retrievable: {:?}",
+        fault.hits.iter().map(|h| &h.path).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn gist_stays_a_unit_vector_after_edits() {
+    let (_tmp, dir) = build_fixture("delta_gist");
+    let catalog = Catalog::open(&dir).unwrap();
+    let embedder = catalog.query_embedder();
+    let mut live = libaim::LiveCatalog::new(catalog);
+
+    live.ingest_file(
+        "hw/misc/apple_mbox.c",
+        "static void replaced(void) { int x = 1; }\n",
+        &embedder,
+        &ChunkConfig::default(),
+    )
+    .unwrap();
+
+    let gist = live.gist();
+    assert_eq!(gist.len(), live.dim());
+    let norm = gist.iter().map(|x| x * x).sum::<f32>().sqrt();
+    assert!((norm - 1.0).abs() < 1e-4, "gist norm drifted to {norm}");
+    assert!(gist.iter().all(|x| x.is_finite()));
 }
