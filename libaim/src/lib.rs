@@ -60,6 +60,7 @@ pub mod format;
 pub mod gate;
 pub mod heat;
 pub mod indexer;
+pub mod watch;
 
 pub use catalog::{
     Catalog, CatalogBuilder, CatalogMeta, Hit, PageFaultResult, RetrievalConfig, CONTAINER_FILE,
@@ -73,6 +74,7 @@ pub use format::{Header, DEFAULT_BIT_WIDTH, DEFAULT_DIM};
 pub use gate::{GateDecision, QueryGate, SkipReason};
 pub use heat::{HeatMap, PinReport};
 pub use indexer::{index_workspace, IndexOptions, IndexStats};
+pub use watch::{start_watcher, Debouncer, WatchConfig, WatchStats, WatcherHandle};
 
 #[cfg(feature = "http-embed")]
 pub use embed_http::{

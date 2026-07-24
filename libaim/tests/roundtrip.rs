@@ -982,3 +982,98 @@ fn gist_stays_a_unit_vector_after_edits() {
     assert!((norm - 1.0).abs() < 1e-4, "gist norm drifted to {norm}");
     assert!(gist.iter().all(|x| x.is_finite()));
 }
+
+#[test]
+fn watcher_picks_up_an_edit_and_refreshes_retrieval() {
+    use std::sync::{Arc, RwLock};
+    use std::time::{Duration, Instant};
+
+    let (tmp, dir) = build_fixture("watch_edit");
+    let catalog = Catalog::open(&dir).unwrap();
+    let embedder = catalog.query_embedder();
+    let live = Arc::new(RwLock::new(libaim::LiveCatalog::new(catalog)));
+
+    let cfg = libaim::WatchConfig {
+        debounce: Duration::from_millis(150),
+        ..Default::default()
+    };
+    let handle = libaim::start_watcher(tmp.path(), live.clone(), cfg).unwrap();
+
+    // Replace the mailbox file with content containing a distinctive
+    // marker that cannot appear in the base catalog.
+    let path = "hw/misc/apple_mbox.c";
+    let rewritten = "static void watcher_marker_fn(void) { /* freshly written */ }\n";
+    std::fs::write(tmp.path().join(path), rewritten).unwrap();
+
+    // Filesystem events are inherently asynchronous, so poll rather than
+    // sleeping a fixed amount.
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        if handle.stats().snapshot().0 > 0 {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "watcher never ingested the edit (stats: {:?})",
+            handle.stats().snapshot()
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    let query = embedder.embed("watcher_marker_fn freshly written").unwrap();
+    let retrieval = RetrievalConfig {
+        fault_threshold: 0.0,
+        relative_floor: 0.0,
+        ..Default::default()
+    };
+    let fault = live.read().unwrap().page_fault(&query, &retrieval).unwrap();
+
+    assert!(
+        fault.hits.iter().any(|h| h.text.contains("watcher_marker_fn")),
+        "new content not retrievable after the watcher ran: {:?}",
+        fault.hits.iter().map(|h| (&h.path, h.line_start)).collect::<Vec<_>>()
+    );
+    assert!(
+        !fault.hits.iter().any(|h| h.text.contains("apple_mbox_drain_inbox")),
+        "stale content still retrievable after the watcher ran"
+    );
+
+    handle.stop();
+}
+
+#[test]
+fn watcher_ignores_build_output_and_binaries() {
+    use std::sync::{Arc, RwLock};
+    use std::time::Duration;
+
+    let (tmp, dir) = build_fixture("watch_ignore");
+    let catalog = Catalog::open(&dir).unwrap();
+    let live = Arc::new(RwLock::new(libaim::LiveCatalog::new(catalog)));
+
+    let handle = libaim::start_watcher(
+        tmp.path(),
+        live.clone(),
+        libaim::WatchConfig {
+            debounce: Duration::from_millis(100),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    // None of these may reach the delta layer.
+    std::fs::write(tmp.path().join("target/debug/build.rs"), "fn main() { }").unwrap();
+    std::fs::write(tmp.path().join("logo.png"), [0u8, 1, 2, 3]).unwrap();
+    std::fs::create_dir_all(tmp.path().join("node_modules/pkg")).unwrap();
+    std::fs::write(tmp.path().join("node_modules/pkg/index.js"), "module.exports={}").unwrap();
+
+    std::thread::sleep(Duration::from_millis(900));
+
+    assert_eq!(
+        handle.stats().snapshot().0,
+        0,
+        "watcher ingested a file it should have filtered"
+    );
+    assert!(live.read().unwrap().delta().is_empty());
+
+    handle.stop();
+}
