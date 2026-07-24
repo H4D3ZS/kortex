@@ -17,10 +17,13 @@
 //! A slow catalog degrades to a plain proxy; it never hangs the editor.
 
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
-use libaim::{Catalog, Embedder, HashEmbedder, HeatMap, QueryGate, RetrievalConfig};
+use libaim::{
+    Catalog, Embedder, HashEmbedder, HeatMap, LiveCatalog, QueryGate, RetrievalConfig,
+    WatchConfig, WatcherHandle,
+};
 use serde_json::Value;
 
 /// Environment variable holding the catalog directory.
@@ -33,18 +36,25 @@ pub const ENV_RELATIVE: &str = "KORTEX_RETRIEVAL_RELATIVE";
 pub const ENV_TOKEN_BUDGET: &str = "KORTEX_RETRIEVAL_TOKEN_BUDGET";
 /// Environment variable overriding the minimum content-token gate.
 pub const ENV_MIN_TOKENS: &str = "KORTEX_RETRIEVAL_MIN_TOKENS";
+/// Set to `0` or `false` to disable the filesystem watcher.
+pub const ENV_WATCH: &str = "KORTEX_WATCH";
+/// Workspace root to watch. Defaults to the catalog's recorded root.
+pub const ENV_WORKSPACE: &str = "KORTEX_WORKSPACE";
 
 /// Default wall-clock budget for one retrieval.
 const DEFAULT_BUDGET_MS: u64 = 100;
 
 /// Shared retrieval state.
 pub struct RetrievalEngine {
-    catalog: Option<Arc<Catalog>>,
+    catalog: Option<Arc<RwLock<LiveCatalog>>>,
     embedder: HashEmbedder,
     cfg: RetrievalConfig,
     gate: QueryGate,
     budget: Duration,
     heat: Arc<Mutex<HeatMap>>,
+    /// Held to keep the watcher thread alive for the process lifetime.
+    /// Dropping it stops watching.
+    _watcher: Option<WatcherHandle>,
 }
 
 impl RetrievalEngine {
@@ -78,6 +88,7 @@ impl RetrievalEngine {
             gate,
             budget,
             heat: Arc::new(Mutex::new(HeatMap::default())),
+            _watcher: None,
         };
 
         let Some(dir) = Self::locate_catalog() else {
@@ -108,8 +119,42 @@ impl RetrievalEngine {
                     catalog.dim(),
                     dir.display()
                 );
+
+                // The workspace the catalog's paths are relative to.
+                // Without it the watcher cannot form matching relative
+                // paths, and every edit would shadow nothing.
+                let workspace = std::env::var(ENV_WORKSPACE)
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|_| PathBuf::from(&catalog.meta().root));
+
+                let live = Arc::new(RwLock::new(LiveCatalog::new(catalog)));
                 engine.embedder = embedder;
-                engine.catalog = Some(Arc::new(catalog));
+
+                if watching_enabled() {
+                    match libaim::start_watcher(
+                        &workspace,
+                        live.clone(),
+                        WatchConfig::default(),
+                    ) {
+                        Ok(handle) => {
+                            eprintln!(
+                                "[aim-proxy] watching {} — edits refresh retrieval automatically",
+                                workspace.display()
+                            );
+                            engine._watcher = Some(handle);
+                        }
+                        Err(e) => {
+                            // Retrieval still works, it just goes stale
+                            // on edits. Worth saying out loud.
+                            eprintln!(
+                                "[aim-proxy] could not watch {}: {e}. Retrieval will serve the                                  catalog as built until the next `aim-index build`.",
+                                workspace.display()
+                            );
+                        }
+                    }
+                }
+
+                engine.catalog = Some(live);
             }
             Err(e) => {
                 eprintln!(
@@ -172,10 +217,13 @@ impl RetrievalEngine {
             let hints = path_hints(&query);
             let hint_refs: Vec<&str> = hints.iter().map(|s| s.as_str()).collect();
 
+            // Read lock: concurrent requests retrieve in parallel and
+            // only a watcher ingest blocks them, briefly.
+            let guard = catalog.read().ok()?;
             let fault = if hint_refs.is_empty() {
-                catalog.page_fault(&vector, &cfg)
+                guard.page_fault(&vector, &cfg)
             } else {
-                catalog.page_fault_scoped(&vector, &cfg, &hint_refs)
+                guard.page_fault_scoped(&vector, &cfg, &hint_refs)
             }
             .ok()?;
 
@@ -234,7 +282,8 @@ impl RetrievalEngine {
         if hottest.is_empty() {
             return;
         }
-        let report = catalog.pin_chunks(&hottest, budget_bytes);
+        let Ok(guard) = catalog.read() else { return };
+        let report = guard.pin_chunks(&hottest, budget_bytes);
         println!(
             "[aim-proxy] pinned {}/{} hot chunks ({} KiB resident)",
             report.pinned,
@@ -313,6 +362,14 @@ pub fn path_hints(query: &str) -> Vec<String> {
     hints.sort();
     hints.dedup();
     hints
+}
+
+/// Whether the filesystem watcher should run.
+fn watching_enabled() -> bool {
+    match std::env::var(ENV_WATCH) {
+        Ok(v) => !matches!(v.trim().to_ascii_lowercase().as_str(), "0" | "false" | "no" | "off"),
+        Err(_) => true,
+    }
 }
 
 /// Read and parse an environment variable, ignoring unparseable values.

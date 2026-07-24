@@ -288,6 +288,53 @@ impl LiveCatalog {
         query: &[f32],
         cfg: &RetrievalConfig,
     ) -> Result<PageFaultResult, AimError> {
+        self.page_fault_inner(query, cfg, None)
+    }
+
+    /// Retrieval restricted to paths containing one of `substrings`.
+    ///
+    /// Applies to both tiers: the base is searched through turbovec's
+    /// allowlist, and delta chunks are filtered by the same substrings.
+    /// Scoping only the base would let an edited file outside the scope
+    /// leak into a request that named a specific file.
+    pub fn page_fault_scoped(
+        &self,
+        query: &[f32],
+        cfg: &RetrievalConfig,
+        path_substrings: &[&str],
+    ) -> Result<PageFaultResult, AimError> {
+        let matches_scope = |path: &str| {
+            path_substrings
+                .iter()
+                .any(|s| !s.is_empty() && path.contains(s))
+        };
+        let base_ids = self.base.chunks_matching_paths(path_substrings);
+        let delta_matches = self
+            .delta
+            .live
+            .keys()
+            .any(|p| matches_scope(p));
+
+        // Nothing anywhere matched the hint, so it was probably wrong.
+        // A corpus-wide search beats returning nothing.
+        if base_ids.is_empty() && !delta_matches {
+            return self.page_fault(query, cfg);
+        }
+        self.page_fault_inner(query, cfg, Some(path_substrings))
+    }
+
+    /// Pin the hottest base chunks into physical RAM. Delta chunks are
+    /// already resident, so only the base needs locking.
+    pub fn pin_chunks(&self, chunk_ids: &[u64], budget_bytes: usize) -> crate::heat::PinReport {
+        self.base.pin_chunks(chunk_ids, budget_bytes)
+    }
+
+    fn page_fault_inner(
+        &self,
+        query: &[f32],
+        cfg: &RetrievalConfig,
+        scope: Option<&[&str]>,
+    ) -> Result<PageFaultResult, AimError> {
         if query.len() != self.dim() {
             return Err(AimError::DimMismatch {
                 catalog: self.dim(),
@@ -299,9 +346,21 @@ impl LiveCatalog {
         // scoring, and without headroom a heavily-edited session could
         // filter the candidate list down to nothing.
         let base_k = cfg.candidates.saturating_mul(2).max(cfg.candidates);
+        let in_scope = |path: &str| match scope {
+            None => true,
+            Some(subs) => subs.iter().any(|s| !s.is_empty() && path.contains(s)),
+        };
+
         let mut candidates: Vec<(f32, Option<u64>, Option<&LiveChunk>)> = Vec::new();
 
-        for (score, id) in self.base.search(query, base_k)? {
+        let base_hits = match scope {
+            Some(subs) => {
+                let allowed = self.base.chunks_matching_paths(subs);
+                self.base.search_scoped(query, base_k, &allowed)?
+            }
+            None => self.base.search(query, base_k)?,
+        };
+        for (score, id) in base_hits {
             let path = self.base.chunk_path(id)?;
             if self.delta.is_shadowed(path) {
                 continue;
@@ -309,6 +368,9 @@ impl LiveCatalog {
             candidates.push((score, Some(id), None));
         }
         for (score, chunk) in self.delta.search(query, cfg.candidates) {
+            if !in_scope(&chunk.path) {
+                continue;
+            }
             candidates.push((score, None, Some(chunk)));
         }
 

@@ -100,7 +100,13 @@ pub struct WatcherHandle {
     stats: Arc<WatchStats>,
     // Held so the OS watch registration outlives the handle. Dropping
     // the watcher unregisters it and the event channel closes.
-    _watcher: Box<dyn Watcher + Send>,
+    //
+    // `Sync` as well as `Send`: callers park this handle inside shared
+    // application state behind an `Arc`, and `Arc<T>: Sync` requires
+    // `T: Sync`. Without the bound the whole containing struct silently
+    // stops being shareable, which surfaces far from here as an
+    // unsatisfied trait bound on an HTTP handler.
+    _watcher: Box<dyn Watcher + Send + Sync>,
 }
 
 impl WatcherHandle {
