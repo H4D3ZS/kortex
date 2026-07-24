@@ -6,12 +6,49 @@ use std::fs;
 use std::process::Command;
 
 pub mod vedic;
+pub mod verify;
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Diagnostic {
     pub message: String,
     pub level: String,
+    /// First source location for this diagnostic, if it has one.
+    ///
+    /// Populated from cargo's `spans` array — see `Diagnostic::from_cargo`.
+    /// Deserializing this field directly from cargo JSON does not work:
+    /// the field there is `spans` (a list), so a `span` field silently
+    /// stays `None` and every error reaches the model with no location.
     pub span: Option<Span>,
+}
+
+impl Diagnostic {
+    /// Build from one cargo `compiler-message` payload.
+    ///
+    /// Prefers the span cargo marked `is_primary` — for a borrow error
+    /// the primary span is the offending use, while the first span in
+    /// the list is often the earlier binding, which points the model at
+    /// the wrong line.
+    pub fn from_cargo(message: &serde_json::Value) -> Option<Self> {
+        let text = message.get("message")?.as_str()?.to_string();
+        let level = message.get("level")?.as_str()?.to_string();
+
+        let spans = message.get("spans").and_then(|s| s.as_array());
+        let span = spans.and_then(|spans| {
+            spans
+                .iter()
+                .find(|s| s.get("is_primary").and_then(|p| p.as_bool()) == Some(true))
+                .or_else(|| spans.first())
+                .and_then(|s| {
+                    Some(Span {
+                        file_name: s.get("file_name")?.as_str()?.to_string(),
+                        line_start: s.get("line_start")?.as_u64()? as usize,
+                        column_start: s.get("column_start")?.as_u64()? as usize,
+                    })
+                })
+        });
+
+        Some(Diagnostic { message: text, level, span })
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -101,8 +138,7 @@ impl SymbolicVerifier {
         for line in stdout.lines() {
             if let Ok(val) = serde_json::from_str::<serde_json::Value>(line) {
                 if val["reason"] == "compiler-message" {
-                    let msg = &val["message"];
-                    if let Ok(diag) = serde_json::from_value::<Diagnostic>(msg.clone()) {
+                    if let Some(diag) = Diagnostic::from_cargo(&val["message"]) {
                         diagnostics.push(diag);
                     }
                 }
