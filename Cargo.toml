@@ -13,5 +13,12 @@ members = [
 resolver = "2"
 
 [patch.crates-io]
+# `rand` is patched to the git tag; `rand_core` and `rand_chacha` must be
+# patched to the *same* source or the graph ends up with two copies of
+# `rand_core`. That breaks any crate that calls a `SeedableRng` method on
+# a `rand_chacha` type — the trait from one copy is not the trait from
+# the other. turbovec's rotation seeding is exactly that pattern.
 rand = { git = "https://github.com/rust-random/rand", tag = "0.8.5" }
+rand_core = { git = "https://github.com/rust-random/rand", tag = "0.8.5" }
+rand_chacha = { git = "https://github.com/rust-random/rand", tag = "0.8.5" }
 half = { git = "https://github.com/starkat99/half-rs", tag = "v2.4.1" }

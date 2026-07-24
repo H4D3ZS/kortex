@@ -1,10 +1,39 @@
 [package]
 name = "libaim"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
+description = "The .aim catalog: compressed, searchable workspace context with JIT chunk inflation"
 
 [lib]
 crate-type = ["cdylib", "staticlib", "rlib"]
 
+[[bin]]
+name = "aim-index"
+path = "src/bin/aim-index.rs"
+
 [dependencies]
 memmap2 = "0.9.10"
+# L3 retrieval: TurboQuant scalar quantization + SIMD search. Vendored
+# via path rather than crates.io so the kernels stay pinned to a version
+# whose score semantics (unbiased inner product) we depend on.
+turbovec = { path = "../turbovec/turbovec" }
+zstd = "0.13"
+blake3 = "1.5"
+thiserror = "1.0"
+rayon = "1.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.11", features = ["json", "blocking"], optional = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[features]
+default = []
+# Dense embeddings from a local inference server — Lemonade, any
+# OpenAI-compatible endpoint, or Ollama. Off by default so the core
+# crate stays free of a network stack.
+http-embed = ["reqwest"]
+# Previous name for the same capability, kept so existing build scripts
+# and `--features` invocations do not break.
+ollama-embed = ["http-embed"]

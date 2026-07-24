@@ -1,90 +1,78 @@
-use memmap2::Mmap;
-use std::fs::File;
-use std::os::raw::c_char;
-use std::path::Path;
+//! `libaim` — the `.aim` catalog: a compressed, searchable index of a
+//! workspace that resolves a query to the handful of source excerpts
+//! that actually matter.
+//!
+//! # What this replaces
+//!
+//! The original `.aim` path dumped a fixed blob of workspace metadata
+//! into every prompt. That is not retrieval — it costs the same tokens
+//! on every request and gets less useful as the workspace grows. This
+//! crate does the real thing: embed the query, search a quantized index,
+//! and inflate only the chunks that clear a similarity threshold.
+//!
+//! # Pipeline
+//!
+//! ```text
+//!  index time                          query time
+//!  ──────────                          ──────────
+//!  walk workspace                      embed query          (embed)
+//!    │                                   │
+//!  chunk files          (chunk)         search index         (turbovec)
+//!    │                                   │
+//!  embed chunks         (embed)         gate on threshold    (catalog)
+//!    │                                   │
+//!  quantize → .tvim     (turbovec)      inflate survivors    (zstd)
+//!  compress → .aim      (catalog)        │
+//!                                       render prompt block
+//! ```
+//!
+//! Compression is turbovec's TurboQuant: each 1536-d f32 embedding
+//! (6KB) becomes 4 bits per coordinate (768 bytes), a 8× reduction with
+//! near-optimal distortion and no codebook training. Chunk *text* is
+//! zstd-compressed separately and only decompressed on a hit.
+//!
+//! # Example
+//!
+//! ```no_run
+//! use libaim::{Catalog, HashEmbedder, Embedder, RetrievalConfig};
+//!
+//! let catalog = Catalog::open(".aim")?;
+//! let embedder = HashEmbedder::new(catalog.dim());
+//! catalog.check_embedder(&embedder.id())?;
+//!
+//! let query = embedder.embed("fix the mailbox IRQ starvation")?;
+//! let fault = catalog.page_fault(&query, &RetrievalConfig::default())?;
+//! if fault.faulted() {
+//!     print!("{}", fault.render_context());
+//! }
+//! # Ok::<(), libaim::AimError>(())
+//! ```
 
-/// Opaque C-Compatible struct defining the active memory map bounds
-pub struct AimMemory {
-    _file: File,
-    mmap: Mmap,
-}
+pub mod catalog;
+pub mod chunk;
+pub mod embed;
+#[cfg(feature = "http-embed")]
+pub mod embed_http;
+pub mod error;
+pub mod ffi;
+pub mod format;
+pub mod gate;
+pub mod heat;
+pub mod indexer;
 
-#[no_mangle]
-pub extern "C" fn aim_mount_vfs(path_ptr: *const c_char) -> *mut AimMemory {
-    if path_ptr.is_null() {
-        return std::ptr::null_mut();
-    }
-    
-    let c_str = unsafe { std::ffi::CStr::from_ptr(path_ptr) };
-    let path_str = match c_str.to_str() {
-        Ok(s) => s,
-        Err(_) => return std::ptr::null_mut(),
-    };
-    
-    // Exact mapping for the physical .aim binary payload on disk natively
-    let target = format!("{}\\.aim\\memory.aim", path_str);
-    
-    let file = match File::open(Path::new(&target)) {
-        Ok(f) => f,
-        Err(_) => return std::ptr::null_mut(),
-    };
-    
-    // Mmap zero-copy directly off the OS File Descriptor into native RAM implicitly
-    let mmap = match unsafe { Mmap::map(&file) } {
-        Ok(m) => m,
-        Err(_) => return std::ptr::null_mut(),
-    };
-    
-    let aim_mem = Box::new(AimMemory {
-        _file: file,
-        mmap,
-    });
-    
-    Box::into_raw(aim_mem)
-}
+pub use catalog::{
+    Catalog, CatalogBuilder, CatalogMeta, Hit, PageFaultResult, RetrievalConfig, CONTAINER_FILE,
+    INDEX_FILE, META_FILE,
+};
+pub use chunk::{chunk_source, ChunkConfig, SourceChunk};
+pub use embed::{cosine, Embedder, HashEmbedder};
+pub use error::AimError;
+pub use format::{Header, DEFAULT_BIT_WIDTH, DEFAULT_DIM};
+pub use gate::{GateDecision, QueryGate, SkipReason};
+pub use heat::{HeatMap, PinReport};
+pub use indexer::{index_workspace, IndexOptions, IndexStats};
 
-#[no_mangle]
-pub extern "C" fn aim_get_tensor(
-    aim_ptr: *mut AimMemory,
-    out_size: *mut usize,
-) -> *const f32 {
-    if aim_ptr.is_null() || out_size.is_null() {
-        return std::ptr::null();
-    }
-    
-    let aim = unsafe { &*aim_ptr };
-    let bytes = &aim.mmap[..];
-    
-    // The .aim format encapsulates the 1536 float32 tensor directly after the JSON Header structural block.
-    // For this raw C-FFI mapping, we locate the closure of the JSON object '}' to extract the float map natively.
-    let mut header_end = 0;
-    for (i, &b) in bytes.iter().enumerate() {
-        if b == b'}' {
-            header_end = i + 1;
-            break;
-        }
-    }
-    
-    if header_end == 0 || header_end + (1536 * 4) > bytes.len() {
-        return std::ptr::null();
-    }
-    
-    unsafe {
-        *out_size = 1536; // Constant structural token dimension
-    }
-    
-    // Return explicit unsafe pointer to physical OS memory bounding natively (Zero Copy / Zero Tokens)
-    let tensor_start = &bytes[header_end];
-    tensor_start as *const u8 as *const f32
-}
-
-#[no_mangle]
-pub extern "C" fn aim_unmount_vfs(aim_ptr: *mut AimMemory) {
-    if aim_ptr.is_null() {
-        return;
-    }
-    // Reclaim ownership seamlessly to allow Rust's intrinsic Drop trait to un-map the active page natively
-    unsafe {
-        let _ = Box::from_raw(aim_ptr);
-    }
-}
+#[cfg(feature = "http-embed")]
+pub use embed_http::{
+    EmbedProtocol, HttpEmbedder, LEMONADE_DEFAULT_URL, OLLAMA_DEFAULT_URL,
+};
