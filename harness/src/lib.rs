@@ -7,6 +7,7 @@ use std::process::Command;
 
 pub mod vedic;
 pub mod verify;
+pub mod lemonade;
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Diagnostic {
