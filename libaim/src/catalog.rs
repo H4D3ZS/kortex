@@ -25,6 +25,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use memmap2::Mmap;
+use turbovec::io::MmapIndex;
 use turbovec::IdMapIndex;
 
 use crate::chunk::SourceChunk;
@@ -442,7 +443,7 @@ pub struct Catalog {
     id_to_idx: HashMap<u64, usize>,
     /// Chunk ids grouped by source path, for scoped search.
     path_to_chunks: HashMap<String, Vec<u64>>,
-    index: IdMapIndex,
+    index: MmapIndex,
     meta: CatalogMeta,
 }
 
@@ -487,9 +488,9 @@ impl Catalog {
         }
 
         let index_path = dir.join(INDEX_FILE);
-        let index = IdMapIndex::load(&index_path)
+        let index = MmapIndex::open_tvim(&index_path)
             .map_err(|e| AimError::io("load turbovec index", &index_path, e))?;
-        if index.len() != records.len() {
+        if index.n_vectors != records.len() {
             return Err(AimError::Corrupt(
                 "turbovec index vector count does not match the container's chunk count",
             ));

@@ -16,7 +16,7 @@ memmap2 = "0.9.10"
 # L3 retrieval: TurboQuant scalar quantization + SIMD search. Vendored
 # via path rather than crates.io so the kernels stay pinned to a version
 # whose score semantics (unbiased inner product) we depend on.
-turbovec = { path = "../turbovec/turbovec" }
+turbovec = { path = "../../turbovec/turbovec" }
 zstd = "0.13"
 blake3 = "1.5"
 thiserror = "1.0"

@@ -3,6 +3,14 @@ name = "aim-proxy"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "aim_proxy"
+path = "src/lib.rs"
+
+[[bin]]
+name = "aim-proxy"
+path = "src/main.rs"
+
 [dependencies]
 axum = "0.7"
 rand = "=0.8.5"

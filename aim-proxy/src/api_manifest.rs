@@ -4,7 +4,7 @@ use axum::{
     Json,
 };
 use serde_json::{Value, json};
-use crate::AppState;
+use crate::server::AppState;
 
 pub async fn handle_manifest(
     State(_state): State<AppState>,
