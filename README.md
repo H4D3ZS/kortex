@@ -157,5 +157,22 @@ The proxy will automatically detect active code modifications, compile changes i
 
 ---
 
+## 🛠 Development & Attribution
+
+**Human-led, AI-assisted.** The architecture, research, and every design decision here are
+human work. The author planned the system, did the research, found the approaches, decided
+what the code should do and how it should read, and reviewed and cleaned everything that
+landed. AI was used as a **boilerplate generator and coding assistant** — turning a decided
+design into a first draft of code — under human direction and review. Nothing here is
+"AI-generated software"; it is engineered by a human who used AI as a tool.
+
+**Combined stack & credits.** This repository ships with **[ROCmFPX](ROCmFPX/)** as a git
+submodule — the AMD RDNA4 inference engine by **Carlo (`charlie12345`)**, a fork of
+llama.cpp/ggml (MIT). All GPU-side capability (low-bit `Q*_ROCMFPX` quants, ROCmFP4/NVFP4,
+MTP / ngram / EAGLE-3 / DFlash speculative decoding, KV slot save/restore) is Carlo's work.
+kortex itself is AGPL-3.0. See **[NOTICE.md](NOTICE.md)** for the full licensing and credits.
+
+---
+
 **Built by the Sovereign Systems Architect under the Cyber Ifrit Software Development Services ecosystem.**  
 *"The best GPU is the one you already have. Make it infinite."*

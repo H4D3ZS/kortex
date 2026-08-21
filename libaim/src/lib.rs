@@ -62,6 +62,7 @@ pub mod heat;
 pub mod indexer;
 pub mod watch;
 
+pub mod ivf;
 pub use catalog::{
     Catalog, CatalogBuilder, CatalogMeta, Hit, PageFaultResult, RetrievalConfig, CONTAINER_FILE,
     INDEX_FILE, META_FILE,

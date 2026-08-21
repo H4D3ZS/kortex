@@ -45,6 +45,12 @@ const ZSTD_LEVEL: i32 = 9;
 pub const CONTAINER_FILE: &str = "catalog.aim";
 /// turbovec index file name within a catalog directory.
 pub const INDEX_FILE: &str = "catalog.tvim";
+
+/// IVF coarse-index sidecar (optional). See [`crate::ivf`].
+pub const IVF_FILE: &str = "catalog.ivf";
+/// Below this many chunks, IVF is skipped: the SIMD scan is already instant
+/// and partitioning would only cost recall.
+pub const IVF_MIN_CHUNKS: usize = 4096;
 /// Metadata file name within a catalog directory.
 pub const META_FILE: &str = "catalog.json";
 
@@ -294,6 +300,20 @@ impl CatalogBuilder {
             .write(&index_path)
             .map_err(|e| AimError::io("write turbovec index", &index_path, e))?;
 
+        // ---- IVF coarse index (sidecar) -------------------------------
+        // Only for large corpora — below IVF_MIN_CHUNKS the SIMD scan is
+        // already instant. sqrt(N) partitions is the standard IVF-flat choice.
+        // self.vectors are the IDF-weighted, normalized vectors that were
+        // indexed, so the IVF partitions live in the same space queries land in.
+        if records.len() >= IVF_MIN_CHUNKS {
+            let n_parts = (records.len() as f64).sqrt().round() as usize;
+            if let Some(ivf) = crate::ivf::IvfIndex::build(&self.vectors, &ids, self.dim, n_parts) {
+                let ivf_path = dir.join(IVF_FILE);
+                ivf.write(&ivf_path)
+                    .map_err(|e| AimError::io("write IVF sidecar", &ivf_path, e))?;
+            }
+        }
+
         let meta = CatalogMeta {
             embedder_id: self.embedder_id,
             root: self.root.to_string_lossy().to_string(),
@@ -445,6 +465,10 @@ pub struct Catalog {
     path_to_chunks: HashMap<String, Vec<u64>>,
     index: MmapIndex,
     meta: CatalogMeta,
+    /// Optional IVF coarse index (sidecar `catalog.ivf`). When present and the
+    /// corpus is large, search probes only the nearest partitions (sublinear).
+    /// Absent → full SIMD scan, so old catalogs keep working unchanged.
+    ivf: Option<crate::ivf::IvfIndex>,
 }
 
 impl Catalog {
@@ -506,6 +530,23 @@ impl Catalog {
         // does not eat the rotation-matrix and codebook build.
         index.prepare();
 
+        // Load the IVF sidecar if present; a missing/corrupt one is non-fatal
+        // (fall back to full scan) so a catalog is never unusable because of it.
+        let ivf = {
+            let p = dir.join(IVF_FILE);
+            if p.exists() {
+                match crate::ivf::IvfIndex::read(&p) {
+                    Ok(v) => Some(v),
+                    Err(e) => {
+                        eprintln!("[libaim] ignoring unreadable {IVF_FILE}: {e}");
+                        None
+                    }
+                }
+            } else {
+                None
+            }
+        };
+
         let mut catalog = Self {
             mmap,
             header,
@@ -514,6 +555,7 @@ impl Catalog {
             path_to_chunks: HashMap::new(),
             index,
             meta,
+            ivf,
         };
 
         // Built after construction so it can reuse `chunk_path`, which
@@ -721,6 +763,26 @@ impl Catalog {
         }
         if self.records.is_empty() || k == 0 {
             return Ok(Vec::new());
+        }
+        // IVF fast path: probe the nearest partitions and restrict the SIMD
+        // scan to their ids (sublinear). n_probe = sqrt(n_partitions) balances
+        // recall vs. work; override with KORTEX_IVF_NPROBE. Falls through to a
+        // full scan when there is no IVF or the probe yields nothing.
+        if let Some(ivf) = &self.ivf {
+            let n_probe = std::env::var("KORTEX_IVF_NPROBE")
+                .ok()
+                .and_then(|v| v.parse::<usize>().ok())
+                .unwrap_or_else(|| (ivf.n_partitions() as f64).sqrt().ceil() as usize);
+            let allow = ivf.probe(query, n_probe);
+            if !allow.is_empty() {
+                let (scores, ids) =
+                    self.index.search_with_allowlist(query, k.min(allow.len()), Some(&allow));
+                return Ok(scores
+                    .into_iter()
+                    .zip(ids)
+                    .filter(|(_, id)| self.id_to_idx.contains_key(id))
+                    .collect());
+            }
         }
         let (scores, ids) = self.index.search(query, k.min(self.records.len()));
         Ok(scores
