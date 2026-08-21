@@ -465,10 +465,11 @@ pub struct Catalog {
     path_to_chunks: HashMap<String, Vec<u64>>,
     index: MmapIndex,
     meta: CatalogMeta,
-    /// Optional IVF coarse index (sidecar `catalog.ivf`). When present and the
-    /// corpus is large, search probes only the nearest partitions (sublinear).
-    /// Absent → full SIMD scan, so old catalogs keep working unchanged.
-    ivf: Option<crate::ivf::IvfIndex>,
+    /// Optional IVF coarse index (sidecar `catalog.ivf`), memory-mapped. When
+    /// present and the corpus is large, search probes only the nearest
+    /// partitions (sublinear, disk-resident). Absent → full SIMD scan, so old
+    /// catalogs keep working unchanged.
+    ivf: Option<crate::ivf::IvfMmap>,
 }
 
 impl Catalog {
@@ -535,7 +536,7 @@ impl Catalog {
         let ivf = {
             let p = dir.join(IVF_FILE);
             if p.exists() {
-                match crate::ivf::IvfIndex::read(&p) {
+                match crate::ivf::IvfMmap::open(&p) {
                     Ok(v) => Some(v),
                     Err(e) => {
                         eprintln!("[libaim] ignoring unreadable {IVF_FILE}: {e}");
