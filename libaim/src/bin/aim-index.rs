@@ -31,6 +31,8 @@ BUILD OPTIONS:
     --dim N            Embedding dimension          [default: 1536]
     --bits N           Quantizer bit width (2-4)    [default: 4]
     --max-file-bytes N Skip files larger than this  [default: 2097152]
+    --ignore NAME      Skip a directory name (repeatable), on top of
+                       the .git/target/node_modules/... defaults
 
   Dense embeddings (instead of the built-in hash embedder):
     --model NAME       Embedding model to request from the server
@@ -154,6 +156,14 @@ fn cmd_build(argv: &[String]) -> Result<(), String> {
     };
     opts.out_dir = args.get("out").map(Into::into);
     opts.max_file_bytes = args.parse_or("max-file-bytes", opts.max_file_bytes)?;
+    // Repeatable --ignore NAME: skip project-specific noise dirs (e.g. a
+    // vendored submodule) on top of DEFAULT_IGNORED_DIRS. Without this a
+    // large vendored tree dominates the catalog and drowns real results.
+    opts.extra_ignored_dirs = args
+        .all("ignore")
+        .into_iter()
+        .map(str::to_string)
+        .collect();
 
     // Chosen here rather than inside the library so the catalog records
     // exactly which embedder produced it.
@@ -269,7 +279,7 @@ fn build_http_embedder(
 }
 
 fn cmd_query(argv: &[String]) -> Result<(), String> {
-    let args = Args::parse(argv, &["show-text"])?;
+    let args = Args::parse(argv, &["show-text", "no-hybrid"])?;
     let dir = args
         .positional
         .first()
@@ -280,12 +290,11 @@ fn cmd_query(argv: &[String]) -> Result<(), String> {
     }
 
     let catalog = Catalog::open(dir).map_err(|e| e.to_string())?;
-    catalog
-        .check_embedder(&HashEmbedder::new(catalog.dim()).id())
-        .map_err(|e| e.to_string())?;
-    // Carries the catalog's IDF table, so query vectors land in the
-    // same space as the indexed ones.
-    let embedder = catalog.query_embedder();
+    // Matches whichever backend built the catalog (lexical hash OR dense
+    // http); carries the catalog's IDF for hash, reconnects the server
+    // for http. Using a plain HashEmbedder on a dense catalog would score
+    // pure noise.
+    let embedder = catalog.query_embedder_dyn().map_err(|e| e.to_string())?;
 
     let cfg = RetrievalConfig {
         fault_threshold: args.parse_or("threshold", 0.05f32)?,
@@ -296,8 +305,16 @@ fn cmd_query(argv: &[String]) -> Result<(), String> {
 
     let vector = embedder.embed(&query).map_err(|e| e.to_string())?;
     let scopes = args.all("scope");
+    // Hybrid (dense semantic + lexical exact, fused by RRF) is the default
+    // for dense catalogs; `--no-hybrid` forces pure semantic. Lexical adds
+    // nothing to an already-lexical catalog, so hash catalogs stay pure.
+    let hybrid = !args.has("no-hybrid")
+        && scopes.is_empty()
+        && !catalog.meta().embedder_id.starts_with("hash-");
     let started = std::time::Instant::now();
-    let fault = if scopes.is_empty() {
+    let fault = if hybrid {
+        catalog.hybrid_fault(&query, &vector, &cfg)
+    } else if scopes.is_empty() {
         catalog.page_fault(&vector, &cfg)
     } else {
         catalog.page_fault_scoped(&vector, &cfg, &scopes)

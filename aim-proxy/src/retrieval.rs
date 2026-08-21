@@ -47,7 +47,13 @@ const DEFAULT_BUDGET_MS: u64 = 100;
 /// Shared retrieval state.
 pub struct RetrievalEngine {
     catalog: Option<Arc<RwLock<LiveCatalog>>>,
-    embedder: HashEmbedder,
+    /// Whichever backend built the loaded catalog (lexical hash OR dense
+    /// http). Arc so a `spawn_blocking` retrieval can hold its own handle.
+    embedder: Arc<dyn Embedder>,
+    /// Fuse a lexical BM25 channel with the dense one (hybrid retrieval).
+    /// On only for dense catalogs — BM25 adds nothing to an already-lexical
+    /// hash catalog. Fixes exact-symbol queries the dense channel misses.
+    hybrid: bool,
     cfg: RetrievalConfig,
     gate: QueryGate,
     budget: Duration,
@@ -83,7 +89,8 @@ impl RetrievalEngine {
 
         let mut engine = Self {
             catalog: None,
-            embedder: HashEmbedder::new(libaim::DEFAULT_DIM),
+            embedder: Arc::new(HashEmbedder::new(libaim::DEFAULT_DIM)),
+            hybrid: false,
             cfg,
             gate,
             budget,
@@ -101,22 +108,24 @@ impl RetrievalEngine {
 
         match Catalog::open(&dir) {
             Ok(catalog) => {
-                // The embedder must match the one that built the
-                // catalog, or every score is noise. Better to run
-                // un-augmented than to inject unrelated code.
-                if let Err(e) =
-                    catalog.check_embedder(&HashEmbedder::new(catalog.dim()).id())
-                {
-                    eprintln!("[aim-proxy] catalog at {} unusable: {e}", dir.display());
-                    return engine;
-                }
-                // Must carry the catalog's IDF weights, or query vectors
-                // live in a different space than the indexed ones.
-                let embedder = catalog.query_embedder();
+                // Build the embedder that matches whichever backend built
+                // this catalog (lexical hash OR dense http). A mismatch
+                // makes every score noise, so bail to pass-through instead
+                // of injecting unrelated code. For hash catalogs this also
+                // carries the catalog's IDF weights; for http it reconnects
+                // to the embedding server recorded in the catalog id.
+                let embedder = match catalog.query_embedder_dyn() {
+                    Ok(e) => e,
+                    Err(e) => {
+                        eprintln!("[aim-proxy] catalog at {} unusable: {e}", dir.display());
+                        return engine;
+                    }
+                };
                 eprintln!(
-                    "[aim-proxy] catalog loaded: {} chunks, {} dims, from {}",
+                    "[aim-proxy] catalog loaded: {} chunks, {} dims, embedder `{}`, from {}",
                     catalog.len(),
                     catalog.dim(),
+                    embedder.id(),
                     dir.display()
                 );
 
@@ -128,7 +137,16 @@ impl RetrievalEngine {
                     .unwrap_or_else(|_| PathBuf::from(&catalog.meta().root));
 
                 let live = Arc::new(RwLock::new(LiveCatalog::new(catalog)));
-                engine.embedder = embedder;
+                // Hybrid (dense + lexical BM25) for dense catalogs; disable
+                // with KORTEX_HYBRID=0. Hash catalogs gain nothing from it.
+                engine.hybrid = !embedder.id().starts_with("hash-")
+                    && std::env::var("KORTEX_HYBRID")
+                        .map(|v| v != "0" && v != "false")
+                        .unwrap_or(true);
+                if engine.hybrid {
+                    eprintln!("[aim-proxy] hybrid retrieval on (dense + lexical BM25)");
+                }
+                engine.embedder = Arc::from(embedder);
 
                 if watching_enabled() {
                     match libaim::start_watcher(
@@ -205,6 +223,7 @@ impl RetrievalEngine {
         }
 
         let embedder = self.embedder.clone();
+        let hybrid = self.hybrid;
         let cfg = self.cfg;
         let heat = self.heat.clone();
         let query = query.to_string();
@@ -220,7 +239,11 @@ impl RetrievalEngine {
             // Read lock: concurrent requests retrieve in parallel and
             // only a watcher ingest blocks them, briefly.
             let guard = catalog.read().ok()?;
-            let fault = if hint_refs.is_empty() {
+            let fault = if hybrid && hint_refs.is_empty() {
+                // hybrid runs on the base catalog (dense + lexical BM25);
+                // live edits still flow through the page_fault paths below.
+                guard.base().hybrid_fault(&query, &vector, &cfg)
+            } else if hint_refs.is_empty() {
                 guard.page_fault(&vector, &cfg)
             } else {
                 guard.page_fault_scoped(&vector, &cfg, &hint_refs)

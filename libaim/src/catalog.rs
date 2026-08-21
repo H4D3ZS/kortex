@@ -604,6 +604,54 @@ impl Catalog {
         crate::embed::HashEmbedder::with_idf(self.dim(), self.idf().to_vec())
     }
 
+    /// A query-time embedder matching whichever backend built this
+    /// catalog, chosen from the recorded `embedder_id`.
+    ///
+    /// Hash catalogs get the IDF table (as [`Self::query_embedder`]);
+    /// dense (`http`) catalogs are reconnected to their embedding server
+    /// (URL from `KORTEX_EMBED_SERVER`, else the protocol default). This
+    /// is what the proxy MUST use: a catalog built with dense embeddings
+    /// is meaningless to a `HashEmbedder`, and every score would be noise.
+    pub fn query_embedder_dyn(
+        &self,
+    ) -> Result<Box<dyn crate::embed::Embedder>, AimError> {
+        let id = self.meta.embedder_id.clone();
+        if id.starts_with("hash-") {
+            return Ok(Box::new(self.query_embedder()));
+        }
+        // Dense backends record ids of the form "{tag}:{model}-d{dim}".
+        #[cfg(feature = "http-embed")]
+        {
+            if let Some((tag, model)) = parse_dense_embedder_id(&id) {
+                let protocol = match tag {
+                    "lemonade" => crate::embed_http::EmbedProtocol::Lemonade,
+                    "openai" => crate::embed_http::EmbedProtocol::OpenAi,
+                    "ollama" => crate::embed_http::EmbedProtocol::Ollama,
+                    other => {
+                        return Err(AimError::Index(format!(
+                            "catalog embedder tag `{other}` is not a known dense backend"
+                        )))
+                    }
+                };
+                let url = std::env::var("KORTEX_EMBED_SERVER")
+                    .unwrap_or_else(|_| protocol.default_url().to_string());
+                let emb =
+                    crate::embed_http::HttpEmbedder::connect(protocol, &url, model)?;
+                if emb.dim() != self.dim() {
+                    return Err(AimError::DimMismatch {
+                        catalog: self.dim(),
+                        got: emb.dim(),
+                    });
+                }
+                return Ok(Box::new(emb));
+            }
+        }
+        Err(AimError::Index(format!(
+            "catalog was built with embedder `{id}`, which needs dense-embedding \
+             support — rebuild aim-proxy with `--features http-embed`"
+        )))
+    }
+
     /// Line range and token estimate for a chunk, or `None` if the id
     /// is not in this catalog.
     ///
@@ -798,6 +846,231 @@ impl Catalog {
         self.page_fault_inner(query, cfg, None)
     }
 
+    /// Every chunk that *defines* `symbol` (declaration keyword before it,
+    /// or an assignment/typed field). The structural half of Stage 2/3,
+    /// exposed for the agentic `find_definition` tool. Exact, no embedding.
+    pub fn find_definitions(&self, symbol: &str) -> Result<Vec<Hit>, AimError> {
+        let sym = symbol.to_lowercase();
+        let mut hits = Vec::new();
+        for rec in &self.records {
+            let text = self.inflate(rec.id)?;
+            if chunk_defines(&text, &sym) {
+                hits.push(Hit {
+                    chunk_id: rec.id,
+                    path: self.chunk_path(rec.id)?.to_string(),
+                    line_start: rec.line_start,
+                    line_end: rec.line_end,
+                    score: 1.0,
+                    token_estimate: rec.token_estimate,
+                    text,
+                });
+            }
+        }
+        Ok(hits)
+    }
+
+    /// Hybrid retrieval: fuse the dense/semantic ranking with a lexical
+    /// (exact-token) ranking via reciprocal-rank fusion. This is the fix
+    /// for the case a pure-semantic search misses an exact-symbol query
+    /// ("what is KVTYPE set to") that lexical matching nails.
+    ///
+    /// `lex` is a lexical embedder (a `HashEmbedder`); every chunk's text
+    /// is scored against it — cheap at kortex catalog sizes (precompute a
+    /// lexical index for very large corpora; that is Stage 1.5). A chunk is
+    /// kept only if EITHER channel clears the absolute floor, so an
+    /// off-topic query still yields no hits and the gate is preserved.
+    pub fn hybrid_fault(
+        &self,
+        query_text: &str,
+        sem_vec: &[f32],
+        cfg: &RetrievalConfig,
+    ) -> Result<PageFaultResult, AimError> {
+        use std::collections::{HashMap, HashSet};
+
+        // Channel 1 — semantic (the existing dense search).
+        let sem = self.search(sem_vec, cfg.candidates)?;
+        let sem_score: HashMap<u64, f32> = sem.iter().map(|(s, id)| (*id, *s)).collect();
+        let sem_ranking: Vec<u64> = sem.iter().map(|(_, id)| *id).collect();
+        // Same scale-free semantic gate as page_fault: a fraction of the
+        // best score, never below the absolute floor. Keeps the dense
+        // channel from admitting weakly-similar chunks on an off-topic query.
+        let sem_best = sem.first().map(|(s, _)| *s).unwrap_or(0.0);
+        let sem_cutoff = cfg
+            .fault_threshold
+            .max(sem_best * cfg.relative_floor.clamp(0.0, 1.0));
+
+        // Channel 2 — lexical BM25 over every chunk's text. BM25's IDF term
+        // heavily rewards RARE query tokens (an identifier like `KVTYPE`
+        // that occurs in only one chunk) — exactly what a pure-cosine
+        // lexical channel washes out. Inflating every chunk is cheap at
+        // kortex sizes; precompute for very large corpora (Stage 1.5).
+        let mut q_terms = bm25_tokenize(query_text);
+        q_terms.sort();
+        q_terms.dedup();
+        // Stage-2 structural signal: which chunks DEFINE a query symbol
+        // (vs merely mention it). Only identifier-ish terms (len >= 4) are
+        // treated as symbols, so stopwords/keywords ("for", "type", "the")
+        // do not trigger spurious definition boosts.
+        let sym_terms: Vec<&str> =
+            q_terms.iter().filter(|t| t.len() >= 4).map(|s| s.as_str()).collect();
+        let mut def_ids: HashSet<u64> = HashSet::new();
+        let mut chunk_toks: Vec<(u64, Vec<String>)> =
+            Vec::with_capacity(self.records.len());
+        for rec in &self.records {
+            let text = self.inflate(rec.id)?;
+            if !sym_terms.is_empty() && sym_terms.iter().any(|s| chunk_defines(&text, s)) {
+                def_ids.insert(rec.id);
+            }
+            chunk_toks.push((rec.id, bm25_tokenize(&text)));
+        }
+        let n_docs = chunk_toks.len().max(1) as f64;
+        let avgdl = (chunk_toks.iter().map(|(_, t)| t.len()).sum::<usize>() as f64
+            / n_docs)
+            .max(1.0);
+        let df: HashMap<&str, f64> = q_terms
+            .iter()
+            .map(|term| {
+                let d = chunk_toks
+                    .iter()
+                    .filter(|(_, t)| t.iter().any(|w| w == term))
+                    .count() as f64;
+                (term.as_str(), d)
+            })
+            .collect();
+        let (k1, b) = (1.5f64, 0.75f64);
+        let mut lex_scored: Vec<(f32, u64)> = chunk_toks
+            .iter()
+            .map(|(id, toks)| {
+                let dl = toks.len() as f64;
+                let mut score = 0.0f64;
+                for term in &q_terms {
+                    let tf = toks.iter().filter(|w| *w == term).count() as f64;
+                    if tf == 0.0 {
+                        continue;
+                    }
+                    let d = df[term.as_str()];
+                    let idf = ((n_docs - d + 0.5) / (d + 0.5) + 1.0).ln();
+                    score += idf * (tf * (k1 + 1.0))
+                        / (tf + k1 * (1.0 - b + b * dl / avgdl));
+                }
+                (score as f32, *id)
+            })
+            .collect();
+        lex_scored.sort_by(|a, b| {
+            b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let lex_score: HashMap<u64, f32> =
+            lex_scored.iter().map(|(s, id)| (*id, *s)).collect();
+        let lex_ranking: Vec<u64> =
+            lex_scored.iter().take(cfg.candidates).map(|(_, id)| *id).collect();
+
+        // Fuse by NORMALIZED weighted sum. Semantic cosine is already in
+        // [0,1]; lexical BM25 is normalized by the channel's own max so a
+        // STRONG exact match (an identifier only one chunk contains) can
+        // surface to the top even when semantic missed it entirely — the
+        // whole point of hybrid. Plain rank-fusion (RRF) buries a
+        // lexical-only hit because it over-rewards cross-channel agreement.
+        // The lexical channel is trusted only when it actually matched
+        // (max well above stopword noise), so an off-topic query where no
+        // term hits cannot be amplified into false positives.
+        let lex_max = lex_scored.first().map(|(s, _)| *s).unwrap_or(0.0);
+        let lex_active = lex_max > 0.5;
+        const LEX_WEIGHT: f32 = 1.5;
+        // A lexical-only chunk (semantic missed it) is admitted only when
+        // its RAW BM25 clears this bar — i.e. it matched a RARE query term
+        // (an identifier like `KVTYPE` ~4.0), not one incidental common
+        // word (e.g. "recipe" ~1.7 in an off-topic query). Heuristic and
+        // mildly corpus-scale sensitive; Stage 2's symbol graph replaces it
+        // with exact structure. Semantic relevance still admits on its own.
+        const LEX_GATE_BM25: f32 = 2.5;
+        // Structural boost: a chunk that DEFINES a queried symbol beats one
+        // that merely uses it (e.g. `KVTYPE=...` at the definition site over
+        // `-ctk "$KVTYPE"` usages). Large enough to reorder within a file.
+        const DEF_BOOST: f32 = 1.0;
+        let lex_norm = |id: u64| -> f32 {
+            if lex_active {
+                lex_score.get(&id).copied().unwrap_or(0.0) / lex_max
+            } else {
+                0.0
+            }
+        };
+        let mut ids: Vec<u64> = sem_ranking.clone();
+        for id in &lex_ranking {
+            if !ids.contains(id) {
+                ids.push(*id);
+            }
+        }
+        let mut fused: Vec<(u64, f32)> = ids
+            .iter()
+            .map(|id| {
+                let s = sem_score.get(id).copied().unwrap_or(0.0);
+                let d = if def_ids.contains(id) { DEF_BOOST } else { 0.0 };
+                (*id, s + LEX_WEIGHT * lex_norm(*id) + d)
+            })
+            .collect();
+        fused.sort_by(|a, b| {
+            b.1.partial_cmp(&a.1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then(a.0.cmp(&b.0))
+        });
+
+        let gist_score = cosine(sem_vec, self.gist());
+        let mut best_score = 0.0f32;
+        let mut hits = Vec::new();
+        let mut spent = 0u32;
+        let mut dropped = 0usize;
+        let mut seen_ranges: Vec<(String, u32, u32)> = Vec::new();
+
+        for (id, fscore) in fused {
+            // Gate: admit on genuine SEMANTIC relevance, OR a STRONG lexical
+            // match (raw BM25 over the bar = a rare identifier). An
+            // off-topic query sharing one incidental common word clears
+            // neither and injects nothing.
+            let sem_s = sem_score.get(&id).copied().unwrap_or(0.0);
+            let lex_raw = lex_score.get(&id).copied().unwrap_or(0.0);
+            // A structural definition of a queried symbol is always relevant.
+            if sem_s < sem_cutoff && lex_raw < LEX_GATE_BM25 && !def_ids.contains(&id) {
+                continue;
+            }
+            best_score = best_score.max(fscore);
+            if hits.len() >= cfg.max_chunks {
+                dropped += 1;
+                continue;
+            }
+            let rec = self.record(id)?;
+            if spent + rec.token_estimate > cfg.token_budget {
+                dropped += 1;
+                continue;
+            }
+            let path = self.chunk_path(id)?.to_string();
+            if seen_ranges
+                .iter()
+                .any(|(p, s, e)| *p == path && rec.line_start <= *e && rec.line_end >= *s)
+            {
+                continue;
+            }
+            seen_ranges.push((path.clone(), rec.line_start, rec.line_end));
+            spent += rec.token_estimate;
+            hits.push(Hit {
+                chunk_id: id,
+                path,
+                line_start: rec.line_start,
+                line_end: rec.line_end,
+                score: fscore as f32,
+                token_estimate: rec.token_estimate,
+                text: self.inflate(id)?,
+            });
+        }
+
+        Ok(PageFaultResult {
+            hits,
+            best_score,
+            cutoff: cfg.fault_threshold,
+            gist_score,
+            dropped_to_budget: dropped,
+        })
+    }
+
     /// Retrieval restricted to chunks from paths matching `substrings`.
     ///
     /// When a request names a file, scoping to it skips the SIMD cost of
@@ -984,4 +1257,146 @@ fn centroid(flat: &[f32], dim: usize) -> Vec<f32> {
     }
     normalize(&mut acc);
     acc
+}
+
+/// Parse a dense-embedder id of the form `"{tag}:{model}-d{dim}"` into
+/// `(tag, model)`. Returns `None` for ids that are not `tag:...` — in
+/// particular the lexical `hash-*` ids, which carry no colon. The
+/// `-d{dim}` suffix is stripped from the model using the LAST `-d`, so a
+/// model name that itself contains `-d` (e.g. `text-embedding-3-large`,
+/// `e5-dense`) survives intact.
+///
+/// Only compiled where used: the dense-embed reconnect path (behind
+/// `http-embed`) and the tests. Keeps lexical-only builds warning-free.
+#[cfg(any(feature = "http-embed", test))]
+fn parse_dense_embedder_id(id: &str) -> Option<(&str, &str)> {
+    let (tag, rest) = id.split_once(':')?;
+    let model = rest.rsplit_once("-d").map(|(m, _)| m).unwrap_or(rest);
+    Some((tag, model))
+}
+
+/// Lowercase alphanumeric tokens (splitting on non-word chars and `_`),
+/// for the BM25 lexical channel. Deliberately simple + self-consistent
+/// between query and chunk — BM25 only needs matching tokenization, not
+/// the embedder's subword scheme.
+fn bm25_tokenize(s: &str) -> Vec<String> {
+    s.split(|c: char| !c.is_alphanumeric() && c != '_')
+        .flat_map(|w| w.split('_'))
+        .filter(|w| !w.is_empty())
+        .map(|w| w.to_lowercase())
+        .collect()
+}
+
+#[inline]
+fn is_word_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
+}
+
+/// True if `line_lower` (already lowercased) *defines* the symbol `sym`
+/// (also lowercase): a declaration keyword immediately before it, or an
+/// assignment/field (`sym =` / `sym:`) immediately after. Language-agnostic
+/// and deliberately conservative — this is the Stage-2 def/usage signal
+/// that BM25 cannot give (a definition vs one of many usages), without the
+/// weight of full tree-sitter grammars. Matches only at word boundaries.
+fn line_defines(line_lower: &str, sym: &str) -> bool {
+    const DEF_KW: &[&str] = &[
+        "fn", "def", "struct", "enum", "trait", "class", "type", "interface",
+        "function", "const", "let", "var", "static", "impl", "mod", "macro",
+    ];
+    if sym.is_empty() {
+        return false;
+    }
+    let bytes = line_lower.as_bytes();
+    let mut from = 0usize;
+    while let Some(rel) = line_lower[from..].find(sym) {
+        let idx = from + rel;
+        let end = idx + sym.len();
+        let bound_before = idx == 0 || !is_word_byte(bytes[idx - 1]);
+        let bound_after = end >= bytes.len() || !is_word_byte(bytes[end]);
+        if bound_before && bound_after {
+            // preceding word a declaration keyword?
+            let prev = line_lower[..idx]
+                .trim_end()
+                .rsplit(|c: char| !c.is_alphanumeric() && c != '_')
+                .next()
+                .unwrap_or("");
+            if DEF_KW.contains(&prev) {
+                return true;
+            }
+            // immediately assigned or a typed field?
+            let after = line_lower[end..].trim_start();
+            if after.starts_with('=') && !after.starts_with("==") {
+                return true;
+            }
+            if after.starts_with(':') && !after.starts_with("::") {
+                return true;
+            }
+        }
+        from = end;
+    }
+    false
+}
+
+/// True if any line of `text` defines `sym` (case-insensitive on both).
+fn chunk_defines(text: &str, sym_lower: &str) -> bool {
+    text.lines().any(|l| line_defines(&l.to_lowercase(), sym_lower))
+}
+
+#[cfg(test)]
+mod defines_tests {
+    use super::{chunk_defines, line_defines};
+
+    #[test]
+    fn detects_assignments_and_declarations() {
+        assert!(line_defines("kvtype=\"${kvtype:-q4_0}\"", "kvtype")); // shell assign
+        assert!(line_defines("    let dim: usize = 5;", "dim")); // rust let + kw
+        assert!(line_defines("def process_orders(orders):", "process_orders")); // python def
+        assert!(line_defines("const lex_gate_bm25: f32 = 2.5;", "lex_gate_bm25"));
+    }
+
+    #[test]
+    fn ignores_usages_and_equality() {
+        assert!(!line_defines("total = kvtype + 1", "kvtype")); // usage on RHS
+        assert!(!line_defines("if kvtype == q4", "kvtype")); // equality, not assign
+        assert!(!line_defines("self::kvtype", "kvtype")); // path, not field
+        assert!(!line_defines("kvtypes_map = {}", "kvtype")); // not a word boundary
+    }
+
+    #[test]
+    fn chunk_scans_all_lines_case_insensitively() {
+        let text = "line one\n  KVTYPE = \"q4_0\"\nlast line";
+        assert!(chunk_defines(text, "kvtype"));
+        assert!(!chunk_defines("just a mention of kvtype here", "kvtype"));
+    }
+}
+
+#[cfg(test)]
+mod bm25_tokenize_tests {
+    use super::bm25_tokenize as t;
+
+    #[test]
+    fn splits_on_non_word_and_underscore_and_lowercases() {
+        assert_eq!(t("KV_cache q4_0"), vec!["kv", "cache", "q4", "0"]);
+        assert_eq!(t("KVTYPE=\"${KVTYPE:-q4_0}\""), vec!["kvtype", "kvtype", "q4", "0"]);
+    }
+}
+
+#[cfg(test)]
+mod parse_id_tests {
+    use super::parse_dense_embedder_id as p;
+
+    #[test]
+    fn strips_dim_suffix_even_with_hyphenated_model_names() {
+        assert_eq!(p("lemonade:Qwen3-Embedding-0.6B-GGUF-d1024"),
+                   Some(("lemonade", "Qwen3-Embedding-0.6B-GGUF")));
+        assert_eq!(p("openai:text-embedding-3-large-d3072"),
+                   Some(("openai", "text-embedding-3-large")));
+        assert_eq!(p("ollama:e5-dense-d768"), Some(("ollama", "e5-dense")));
+    }
+
+    #[test]
+    fn lexical_hash_ids_are_not_dense() {
+        assert_eq!(p("hash-v1-d1536"), None);
+        assert_eq!(p("hash-v2-d256"), None);
+    }
 }
