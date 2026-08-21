@@ -1,0 +1,3 @@
+[submodule "ROCmFPX"]
+	path = ROCmFPX
+	url = https://github.com/H4D3ZS/ROCmFPX.git
