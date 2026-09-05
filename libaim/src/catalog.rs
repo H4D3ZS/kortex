@@ -25,7 +25,6 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use memmap2::Mmap;
-use turbovec::io::MmapIndex;
 use turbovec::IdMapIndex;
 
 use crate::chunk::SourceChunk;
@@ -463,7 +462,7 @@ pub struct Catalog {
     id_to_idx: HashMap<u64, usize>,
     /// Chunk ids grouped by source path, for scoped search.
     path_to_chunks: HashMap<String, Vec<u64>>,
-    index: MmapIndex,
+    index: IdMapIndex,
     meta: CatalogMeta,
     /// Optional IVF coarse index (sidecar `catalog.ivf`), memory-mapped. When
     /// present and the corpus is large, search probes only the nearest
@@ -513,9 +512,9 @@ impl Catalog {
         }
 
         let index_path = dir.join(INDEX_FILE);
-        let index = MmapIndex::open_tvim(&index_path)
+        let index = IdMapIndex::load(&index_path)
             .map_err(|e| AimError::io("load turbovec index", &index_path, e))?;
-        if index.n_vectors != records.len() {
+        if index.len() != records.len() {
             return Err(AimError::Corrupt(
                 "turbovec index vector count does not match the container's chunk count",
             ));
@@ -776,8 +775,10 @@ impl Catalog {
                 .unwrap_or_else(|| (ivf.n_partitions() as f64).sqrt().ceil() as usize);
             let allow = ivf.probe(query, n_probe);
             if !allow.is_empty() {
-                let (scores, ids) =
-                    self.index.search_with_allowlist(query, k.min(allow.len()), Some(&allow));
+                let (scores, ids) = self
+                    .index
+                    .search_with_allowlist(query, k.min(allow.len()), Some(&allow))
+                    .map_err(|e| AimError::Index(e.to_string()))?;
                 return Ok(scores
                     .into_iter()
                     .zip(ids)
@@ -845,7 +846,8 @@ impl Catalog {
         let k = k.min(allowed.len());
         let (scores, ids) = self
             .index
-            .search_with_allowlist(query, k, Some(&allowed));
+            .search_with_allowlist(query, k, Some(&allowed))
+            .map_err(|e| AimError::Index(e.to_string()))?;
         Ok(scores
             .into_iter()
             .zip(ids)
