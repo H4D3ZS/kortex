@@ -71,7 +71,15 @@ fn run_app<B: Backend>(
     terminal: &mut Terminal<B>,
     app: &mut App,
     tick_rate: Duration,
-) -> io::Result<()> {
+) -> io::Result<()>
+where
+    // ratatui 0.30 stopped assuming every Backend::Error converts to
+    // io::Error automatically (Backend::Error is no longer io::Error itself
+    // in the general case). This crate only ever instantiates B as
+    // CrosstermBackend<Stdout>, whose Error type *is* io::Error, so the
+    // conversion is always available in practice — just no longer implicit.
+    std::io::Error: From<<B as Backend>::Error>,
+{
     let mut last_tick = Instant::now();
     loop {
         terminal.draw(|f| ui(f, app))?;
@@ -105,7 +113,7 @@ fn ui(f: &mut Frame, app: &App) {
             ]
             .as_ref(),
         )
-        .split(f.size());
+        .split(f.area());
 
     // 1. Mission Status
     let status = Paragraph::new(format!("OBJECTIVE: {}", app.mission_step))

@@ -18,7 +18,7 @@ resolver = "2"
 # `rand_core`. That breaks any crate that calls a `SeedableRng` method on
 # a `rand_chacha` type — the trait from one copy is not the trait from
 # the other. turbovec's rotation seeding is exactly that pattern.
-rand = { git = "https://github.com/rust-random/rand", tag = "0.8.5" }
-rand_core = { git = "https://github.com/rust-random/rand", tag = "0.8.5" }
-rand_chacha = { git = "https://github.com/rust-random/rand", tag = "0.8.5" }
+rand = { git = "https://github.com/rust-random/rand", tag = "0.8.6" }
+rand_core = { git = "https://github.com/rust-random/rand", tag = "0.8.6" }
+rand_chacha = { git = "https://github.com/rust-random/rand", tag = "0.8.6" }
 half = { git = "https://github.com/starkat99/half-rs", tag = "v2.4.1" }

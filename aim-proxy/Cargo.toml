@@ -13,7 +13,7 @@ path = "src/main.rs"
 
 [dependencies]
 axum = "0.7"
-rand = "=0.8.5"
+rand = "=0.8.6"
 candle-core = "=0.7.1"
 candle-nn = "=0.7.1"
 candle-transformers = "=0.7.1"
