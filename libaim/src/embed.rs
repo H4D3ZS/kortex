@@ -256,7 +256,7 @@ impl Embedder for HashEmbedder {
 /// rejects non-finite input, and a zero vector simply scores 0 against
 /// every query, which is the correct behaviour for empty text.
 pub fn normalize(v: &mut [f32]) {
-    let norm = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+    let norm = dot(v, v).sqrt();
     if norm > 0.0 && norm.is_finite() {
         for x in v.iter_mut() {
             *x /= norm;
@@ -266,15 +266,67 @@ pub fn normalize(v: &mut [f32]) {
     }
 }
 
+/// Dot product of two equal-length `f32` slices, written so the compiler
+/// vectorises it: eight independent lane accumulators make the reduction
+/// associative-by-construction (a plain `.sum()` can't be reordered because
+/// float add isn't associative, so LLVM leaves it scalar). This is the exact
+/// f32 rerank / delta-scan kernel — the hottest per-query loop after the
+/// quantised turbovec pass.
+#[inline]
+pub fn dot(a: &[f32], b: &[f32]) -> f32 {
+    let n = a.len().min(b.len());
+    let (a, b) = (&a[..n], &b[..n]);
+    let mut acc = [0f32; 8];
+    let mut ca = a.chunks_exact(8);
+    let mut cb = b.chunks_exact(8);
+    for (x, y) in ca.by_ref().zip(cb.by_ref()) {
+        for l in 0..8 {
+            acc[l] += x[l] * y[l];
+        }
+    }
+    let mut s = ((acc[0] + acc[1]) + (acc[2] + acc[3])) + ((acc[4] + acc[5]) + (acc[6] + acc[7]));
+    for (x, y) in ca.remainder().iter().zip(cb.remainder()) {
+        s += x * y;
+    }
+    s
+}
+
 /// Cosine similarity between two equal-length L2-normalized vectors.
 /// Used to score the exact rerank pass after quantized search.
+#[inline]
 pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
-    a.iter().zip(b).map(|(x, y)| x * y).sum()
+    dot(a, b)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn naive_dot(a: &[f32], b: &[f32]) -> f32 {
+        a.iter().zip(b).map(|(x, y)| x * y).sum()
+    }
+
+    #[test]
+    fn dot_matches_naive_across_lengths_and_tails() {
+        let mut s = 0x1234_5678u64;
+        let mut rnd = || {
+            s = s.wrapping_mul(6364136223846793005).wrapping_add(1);
+            ((s >> 33) as f32 / u32::MAX as f32) * 2.0 - 1.0
+        };
+        for len in [0usize, 1, 7, 8, 9, 15, 16, 33, 64, 256, 257, 1024] {
+            let a: Vec<f32> = (0..len).map(|_| rnd()).collect();
+            let b: Vec<f32> = (0..len).map(|_| rnd()).collect();
+            let (got, want) = (dot(&a, &b), naive_dot(&a, &b));
+            // 8-lane reassociation vs a serial sum: tolerate fp rounding.
+            assert!((got - want).abs() <= 1e-3 + want.abs() * 1e-4, "len {len}: {got} vs {want}");
+        }
+    }
+
+    #[test]
+    fn dot_handles_mismatched_lengths_by_truncating() {
+        assert_eq!(dot(&[1.0, 2.0, 3.0], &[10.0, 10.0]), 30.0);
+        assert_eq!(dot(&[], &[1.0, 2.0]), 0.0);
+    }
 
     #[test]
     fn subwords_splits_camel_snake_and_digits() {

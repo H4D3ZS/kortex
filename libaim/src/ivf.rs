@@ -206,10 +206,7 @@ impl IvfMmap {
     }
 }
 
-#[inline]
-fn dot(a: &[f32], b: &[f32]) -> f32 {
-    a.iter().zip(b).map(|(x, y)| x * y).sum()
-}
+use crate::embed::dot;
 #[inline]
 fn u32_at(m: &[u8], o: usize) -> u32 {
     u32::from_le_bytes([m[o], m[o + 1], m[o + 2], m[o + 3]])

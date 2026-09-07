@@ -150,13 +150,22 @@ impl DeltaLayer {
         if k == 0 || query.len() != self.dim {
             return Vec::new();
         }
-        let mut scored: Vec<(f32, &LiveChunk)> = self
-            .live
-            .values()
-            .flatten()
-            .map(|c| (cosine(query, &c.vector), c))
-            .filter(|(s, _)| s.is_finite())
-            .collect();
+        let all: Vec<&LiveChunk> = self.live.values().flatten().collect();
+        // The exact f32 scan is embarrassingly parallel; fan it out once the
+        // delta layer is big enough that thread hand-off pays for itself.
+        // Below the threshold the serial path avoids rayon's overhead.
+        let mut scored: Vec<(f32, &LiveChunk)> = if all.len() >= 512 {
+            use rayon::prelude::*;
+            all.par_iter()
+                .map(|&c| (cosine(query, &c.vector), c))
+                .filter(|(s, _)| s.is_finite())
+                .collect()
+        } else {
+            all.iter()
+                .map(|&c| (cosine(query, &c.vector), c))
+                .filter(|(s, _)| s.is_finite())
+                .collect()
+        };
 
         // Ties break on path and line so results are deterministic;
         // HashMap iteration order is not.
