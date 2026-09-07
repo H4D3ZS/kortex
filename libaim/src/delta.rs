@@ -20,12 +20,14 @@
 //! same split an LSM tree makes, for the same reason — the base is large
 //! and cold, the delta is small and hot.
 //!
-//! Brute-force cosine over the delta is deliberate. A coding session
-//! touches tens of files, so the delta holds hundreds of vectors at
-//! most; scoring 500 × 1536 floats takes microseconds, which is far
-//! below the millisecond-scale quantized search it rides alongside.
-//! Quantizing the delta would add TQ+ calibration drift for no
-//! measurable gain.
+//! Brute-force cosine over the delta is the default and correct choice:
+//! a coding session touches tens of files, so the delta holds hundreds of
+//! vectors at most; scoring 500 × 1536 floats takes microseconds, far below
+//! the millisecond-scale quantized search it rides alongside. For an unusually
+//! large delta (heavy multi-file editing) [`DeltaLayer::search`] adds a ternary
+//! sign-code pre-filter (see [`crate::ternary`]) that narrows the candidate set
+//! before the exact f32 rerank — the final scores stay exact, only the
+//! candidate set is approximated, and it engages only past a size threshold.
 //!
 //! The delta is not persisted. It is rebuilt by re-reading changed files
 //! at startup or discarded by a full `aim-index build`, and treating it
@@ -36,6 +38,7 @@ use std::collections::{HashMap, HashSet};
 use crate::catalog::{Catalog, Hit, PageFaultResult, RetrievalConfig};
 use crate::chunk::SourceChunk;
 use crate::embed::{cosine, normalize};
+use crate::ternary::{tau_for, TernaryVec};
 use crate::error::AimError;
 
 /// A chunk living in the delta layer, held uncompressed and unquantized.
@@ -48,6 +51,10 @@ pub struct LiveChunk {
     /// L2-normalized embedding, in the base catalog's vector space.
     pub vector: Vec<f32>,
     pub token_estimate: u32,
+    /// Ternary sign code of `vector`, filled by [`DeltaLayer::update_file`].
+    /// Used as a coarse pre-filter when the delta layer is large; `None` until
+    /// the chunk enters the layer.
+    pub(crate) ternary: Option<TernaryVec>,
 }
 
 /// Edits layered over an immutable base catalog.
@@ -81,13 +88,18 @@ impl DeltaLayer {
     /// Shadows the path unconditionally, including when `chunks` is
     /// empty: a file edited down to whitespace still has stale chunks in
     /// the base that must stop being retrieved.
-    pub fn update_file(&mut self, path: &str, chunks: Vec<LiveChunk>) -> Result<(), AimError> {
-        for chunk in &chunks {
+    pub fn update_file(&mut self, path: &str, mut chunks: Vec<LiveChunk>) -> Result<(), AimError> {
+        let tau = tau_for(self.dim, ternary_alpha());
+        for chunk in &mut chunks {
             if chunk.vector.len() != self.dim {
                 return Err(AimError::DimMismatch {
                     catalog: self.dim,
                     got: chunk.vector.len(),
                 });
+            }
+            // Centralised here so every entry path into the layer gets a code.
+            if chunk.ternary.is_none() {
+                chunk.ternary = Some(TernaryVec::from_f32(&chunk.vector, tau));
             }
         }
         let path = normalize_path(path);
@@ -146,22 +158,61 @@ impl DeltaLayer {
     }
 
     /// Top-`k` live chunks by cosine similarity, best first.
+    ///
+    /// Coarse-to-fine for a large delta: a ternary popcount scan (no
+    /// multiplies, cache-resident) narrows to a candidate set, then the exact
+    /// f32 cosine reranks it — so the returned scores are always exact and only
+    /// the *candidate set* is approximated. Engages only past
+    /// `KORTEX_TERNARY_MIN_CHUNKS` (default 2048); a small delta stays on the
+    /// direct scan, which is already microsecond-fast.
     pub fn search(&self, query: &[f32], k: usize) -> Vec<(f32, &LiveChunk)> {
+        self.search_inner(query, k, ternary_min())
+    }
+
+    /// `search` with an explicit ternary-engage threshold (`min`). Exposed for
+    /// tests, which compare the coarse-to-fine path against the exhaustive one.
+    pub(crate) fn search_inner(&self, query: &[f32], k: usize, min: usize) -> Vec<(f32, &LiveChunk)> {
         if k == 0 || query.len() != self.dim {
             return Vec::new();
         }
         let all: Vec<&LiveChunk> = self.live.values().flatten().collect();
-        // The exact f32 scan is embarrassingly parallel; fan it out once the
-        // delta layer is big enough that thread hand-off pays for itself.
-        // Below the threshold the serial path avoids rayon's overhead.
-        let mut scored: Vec<(f32, &LiveChunk)> = if all.len() >= 512 {
+
+        // Narrow to a candidate set. For a large delta, ternary pre-filter;
+        // otherwise every chunk is a candidate (the previous exact behaviour).
+        let candidates: Vec<&LiveChunk> = if all.len() >= min && self.dim >= 64 {
+            let tau = tau_for(self.dim, ternary_alpha());
+            let qt = TernaryVec::from_f32(query, tau);
+            // Keep generously many candidates so the exact rerank still finds
+            // the true top-k (tools/ternary-dot: top-50 holds ~0.998 of top-10).
+            let n = (k * 8).max(64).min(all.len());
+            let mut coarse: Vec<(i32, usize)> = all
+                .iter()
+                .enumerate()
+                .map(|(i, c)| {
+                    let s = c.ternary.as_ref().map(|t| qt.dot(t)).unwrap_or(i32::MIN);
+                    (s, i)
+                })
+                .collect();
+            if n < coarse.len() {
+                coarse.select_nth_unstable_by(n, |a, b| b.0.cmp(&a.0));
+                coarse.truncate(n);
+            }
+            coarse.into_iter().map(|(_, i)| all[i]).collect()
+        } else {
+            all
+        };
+
+        // Exact f32 rerank of the candidate set — parallel above 512.
+        let mut scored: Vec<(f32, &LiveChunk)> = if candidates.len() >= 512 {
             use rayon::prelude::*;
-            all.par_iter()
+            candidates
+                .par_iter()
                 .map(|&c| (cosine(query, &c.vector), c))
                 .filter(|(s, _)| s.is_finite())
                 .collect()
         } else {
-            all.iter()
+            candidates
+                .iter()
                 .map(|&c| (cosine(query, &c.vector), c))
                 .filter(|(s, _)| s.is_finite())
                 .collect()
@@ -178,6 +229,29 @@ impl DeltaLayer {
         scored.truncate(k);
         scored
     }
+}
+
+/// tau multiplier for delta ternary codes (`KORTEX_TERNARY_ALPHA`, default 0.3).
+fn ternary_alpha() -> f32 {
+    std::env::var("KORTEX_TERNARY_ALPHA")
+        .ok()
+        .and_then(|v| v.parse::<f32>().ok())
+        .filter(|a| *a > 0.0 && *a < 2.0)
+        .unwrap_or(0.3)
+}
+
+/// Delta size at/above which the ternary pre-filter engages. **Off by
+/// default** (`usize::MAX`): the coarse ternary funnel is a measured but
+/// data-dependent approximation of the candidate set (see `tools/ternary-dot`
+/// and [`crate::ternary`]), and the default delta embedder is the sparse
+/// feature-hash one for which it is not yet validated. Set
+/// `KORTEX_TERNARY_MIN_CHUNKS` to a value like 2048 to enable it once you have
+/// validated recall on your own dense embeddings.
+fn ternary_min() -> usize {
+    std::env::var("KORTEX_TERNARY_MIN_CHUNKS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(usize::MAX)
 }
 
 /// Normalize separators so a path from a file watcher matches one stored
@@ -245,6 +319,7 @@ impl LiveCatalog {
                     line_end: c.line_end,
                     text: c.text,
                     vector,
+                    ternary: None,
                 })
             })
             .collect();
@@ -474,6 +549,7 @@ mod tests {
             text: format!("contents of {path} at {line_start}"),
             vector,
             token_estimate: 10,
+            ternary: None,
         }
     }
 
@@ -610,5 +686,76 @@ mod tests {
         let with_path = e.embed_with_path("src/apple_mbox.c", "void irq(void) {}").unwrap();
         let without = e.embed("void irq(void) {}").unwrap();
         assert_ne!(with_path, without);
+    }
+
+    // Deterministic anisotropic unit vector (power-law spectrum, like real
+    // embeddings — the regime where sign quantisation preserves ranking).
+    fn aniso(dim: usize, seed: u64) -> Vec<f32> {
+        let mut s = seed.wrapping_mul(0x9E3779B97F4A7C15) | 1;
+        let mut rnd = || {
+            s = s.wrapping_mul(6364136223846793005).wrapping_add(1);
+            ((s >> 33) as f32 / u32::MAX as f32) * 2.0 - 1.0
+        };
+        let mut v: Vec<f32> = (0..dim)
+            .map(|d| rnd() / ((d as f32 + 1.0).powf(0.7)))
+            .collect();
+        let n = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+        if n > 0.0 { for x in v.iter_mut() { *x /= n; } }
+        v
+    }
+
+    #[test]
+    fn ternary_prefilter_matches_exact_top_k_when_engaged() {
+        // With the ternary pre-filter engaged (min=64), search must return the
+        // same top-k as the exhaustive path (min=usize::MAX) on realistic
+        // (anisotropic, relative-jitter) data — the coarse funnel only narrows
+        // the candidate set; the exact f32 rerank produces the final order.
+        let dim = 256;
+        let mut d = DeltaLayer::new(dim);
+        let centre = aniso(dim, 999);
+        // RELATIVE jitter: perturb each dim proportionally to its own scale, so
+        // the dominant-dimension signs (which carry the similarity) survive.
+        let jitter = |seed: u64| -> Vec<f32> {
+            let mut s = seed | 1;
+            let mut v = centre.clone();
+            for (j, x) in v.iter_mut().enumerate() {
+                s = s.wrapping_mul(6364136223846793005).wrapping_add(1);
+                let r = ((s >> 33) as f32 / u32::MAX as f32) * 2.0 - 1.0;
+                *x += 0.15 * r / ((j as f32 + 1.0).powf(0.7));
+            }
+            let n = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+            if n > 0.0 { for x in v.iter_mut() { *x /= n; } }
+            v
+        };
+        let path_of = |i: usize| format!("f{i}.rs");
+        // a cluster of 60 similar vectors + independent-anisotropic distractors
+        for i in 0..60 {
+            d.update_file(&path_of(i), vec![chunk(&path_of(i), 0, jitter(10_000 + i as u64))]).unwrap();
+        }
+        for i in 60..3000 {
+            d.update_file(&path_of(i), vec![chunk(&path_of(i), 0, aniso(dim, i as u64 + 1))]).unwrap();
+        }
+
+        let q = jitter(42);
+        let k = 10;
+        let id = |c: &LiveChunk| -> usize {
+            c.path.trim_start_matches('f').trim_end_matches(".rs").parse().unwrap()
+        };
+        let exact: std::collections::HashSet<usize> =
+            d.search_inner(&q, k, usize::MAX).iter().map(|(_, c)| id(c)).collect();
+        let ternary: std::collections::HashSet<usize> =
+            d.search_inner(&q, k, 64).iter().map(|(_, c)| id(c)).collect();
+        assert_eq!(exact.len(), k);
+        assert_eq!(ternary.len(), k);
+        let overlap = exact.intersection(&ternary).count();
+        assert!(overlap >= k - 1, "ternary vs exact top-{k} overlap only {overlap}/{k}");
+    }
+
+    #[test]
+    fn ternary_prefilter_is_off_by_default() {
+        // ternary_min() defaults to usize::MAX, so a delta that would engage the
+        // filter at a low threshold still takes the exact path by default.
+        std::env::remove_var("KORTEX_TERNARY_MIN_CHUNKS");
+        assert_eq!(super::ternary_min(), usize::MAX);
     }
 }
