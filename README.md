@@ -2,19 +2,20 @@
 
 [![License: AGPL-v3](https://img.shields.io/badge/License-AGPL_v3-red.svg)](LICENSE)
 [![Rust: Stable](https://img.shields.io/badge/Rust-1.80%2B-orange.svg)](https://rust-lang.org)
-[![Active Paper: Fully Verified](https://img.shields.io/badge/Research-Neural--TTT--Validated-blue.svg)](./Neural_AIM_VFS_A.I_Kontex_Solution.pdf)
-[![Cache Hit Rate: 99.97%](https://img.shields.io/badge/Performance-99.97%25%20Cache%20Hit-brightgreen.svg)](#)
+[![Technical Report](https://img.shields.io/badge/Research-Technical%20Report-blue.svg)](./Neural_AIM_VFS_A.I_Kontex_Solution.pdf)
 [![Affiliation: Cyber Ifrit](https://img.shields.io/badge/Publisher-Cyber%20Ifrit%20Software%20Services-purple.svg)](https://github.com/Cyber-Ifrit)
 
 **Kortex** is a sovereign, high-performance cognitive infrastructure that solves the "Context Inflation" and "VRAM Gentry" crises in agentic AI development. By decoupling massive physical filesystems from the active Large Language Model (LLM) context window, Kortex enables autonomous software agents to command multi-gigabyte repositories with stable $O(1)$ token prefixes.
 
 ---
 
-## 📄 Featured Scientific Research Publication
-The complete mathematical framework, rigorous spectral proofs, and formal empirical evaluations of the Kortex architecture are fully documented in our peer-reviewed technical paper:
+## 📄 Technical Report
+The mathematical framework and design rationale behind the Kortex architecture are written up
+as a self-published technical report — not peer-reviewed, no venue, no DOI. Read it as a design
+document, not a validated publication:
 
 📖 **[Holographic Virtual File Systems: Zero-Token Cognitive Integration for Autonomous LLM Software Agents via Latent Superposition (PDF)](./Neural_AIM_VFS_A.I_Kontex_Solution.pdf)**  
-*Lead Investigator: Rolando H. Ferrer Jr. (Sole Proprietor)*  
+*Author: Rolando H. Ferrer Jr. (Sole Proprietor)*  
 *Cyber Ifrit Software Development Services (Technical Report No. CI-2026-01)*
 
 ---
@@ -30,7 +31,7 @@ Traditional AI software agents are severely bounded by raw context injection lim
 ┌─────────────────────────────────────────────────────────────┐
 │  L1/L2 Active Memory: 6KB Limbic Gist Vector                │
 │  - 1,536-dimensional float32 vector in VRAM/local memory    │
-│  - Holographic Key-Value Superposition maps the tree space  │
+│  - Holographic Key-Value Superposition (see capacity below) │
 │  - Remains resident permanently for stable O(1) prefix hit  │
 └──────────────────────────────┬──────────────────────────────┘
                                │
@@ -64,16 +65,29 @@ $$\lim_{N \to \infty} \mathbb{E}\left[ \langle \mathbf{v}_N, \mathbf{c}_i \rangl
 
 This turns the persistent index vector into high-dimensional isotropic white noise, rendering directory traversal and semantic search mathematically impossible.
 
-### The Kortex Solution: Spherical Path-Key Superposition
+### The Kortex Solution: Unitary Path-Key Superposition
 Kortex solves this signal decay through **Key-Value Superposition Binding**:
 
-1. For each script file path string, we generate a deterministic **Path Key** mapped to a high-frequency sine coordinate:
+1. For each script file path string, we generate a deterministic **Path Key**: SHA3-256 of the
+   path string seeds the construction of a *unitary* HRR vector — one whose Discrete Fourier
+   Transform has magnitude exactly 1 at every frequency bin, with a random phase per bin
+   (subject to the conjugate symmetry a real signal requires). Concretely: build that spectrum,
+   inverse-FFT it, done — see `daemon::neural_math::{path_key, unitary_vector}` for the exact
+   code (`kortex/daemon/src/neural_math.rs`).
 
-   $$k_i = \sin\left( \text{Byte}_{(i \pmod L)} \cdot \sin(i) \right)$$
+   An earlier version derived the key directly from the path's own bytes at each vector index
+   ($k_i = \sin(\text{Byte}_{(i \bmod L)} \cdot \sin(i))$). Two problems with that: (a) paths
+   sharing a prefix (`src/foo/a.rs`, `src/foo/b.rs`) produced strongly correlated keys — exactly
+   the files most likely to be retrieved together, and exactly where HRR needs keys to be close
+   to orthogonal; hashing the path first fixes this (avalanche effect: one differing byte flips
+   ~half the hash's output bits). (b) A vector normalized to unit *length* is not the same as a
+   vector with unit magnitude at every *frequency* — the former still has "loud" and "quiet"
+   frequency bins, and correlating with such a key does not cleanly invert convolution even for
+   a single item with zero interference from anything else. Verified empirically: a
+   length-normalized-but-not-unitary key round-trips one bind/unbind at cosine similarity
+   ≈0.70; a unitary key round-trips at ≈1.00 (`daemon/examples/hrr_sanity.rs`).
 
-   where $L$ is the character length of the path.
-
-2. The key is spherically projected onto the unit sphere ($\mathbf{k}_{\text{path}} = \mathbf{k} / \|\mathbf{k}\|_2$) and convolved with the target chunk's LLM embedding:
+2. The unitary key is convolved with the target chunk's LLM embedding:
 
    $$\mathbf{v}_{\text{bound}} = \mathbf{k}_{\text{path}} \circledast \mathbf{c}_{\text{embedding}}$$
 
@@ -81,34 +95,72 @@ Kortex solves this signal decay through **Key-Value Superposition Binding**:
 
    $$\mathbf{v}_{\text{global}}^{(k)} = (1-\alpha) \mathbf{v}_{\text{global}}^{(k-1)} + \alpha \mathbf{v}_{\text{bound}}$$
 
-By performing circular correlation with a target path key, Kortex recovers the exact script context cleanly without decay:
+By performing circular correlation with a target path key, Kortex recovers the script context:
 
-$$\mathbf{b}'_m = \mathbf{v}_{\text{global}} \oplus \mathbf{a}_m \approx \mathbf{b}_m$$
+$$\mathbf{b}'_m = \mathbf{v}_{\text{global}} \oplus \mathbf{a}_m$$
 
-Even with 30,000 files superposed inside the single 6KB vector, the **Signal-to-Noise Ratio (SNR)** remains extremely high ($\text{SNR} \approx d / (k-1) \gg 1$), enabling perfect $O(1)$ search and discovery.
+### Measured Capacity — Not the SNR Formula's $d/(k-1)$
+An earlier version of this section claimed the classic HRR result
+$\text{SNR} \approx d/(k-1) \gg 1$ holds "even with 30,000 files superposed." That formula is the
+standard *auto-associative cleanup* capacity result (Plate, 1995) — decoding a noisy recovered
+vector by nearest-neighbor match against a **known candidate set**. It is not a direct prediction
+of raw cosine similarity against a **fixed absolute threshold**, which is what this system
+actually uses to decide whether to page a file in (`Sim > 0.85`, above). We measured the real
+number instead of assuming the formula transfers.
+
+Why it doesn't transfer: for a *unitary* key (the fix above — needed for exact single-item
+recall), correlating the global vector with the wrong item's key doesn't return a
+small, spread-out noise term — it returns a full-magnitude, randomly phase-rotated copy of that
+*other* item's own content vector, because a unitary key has magnitude exactly 1 at every
+frequency, so it can't attenuate anything. Each additional superposed item therefore contributes
+noise on the *same scale* as the signal itself, not noise damped by $1/\sqrt{d}$. Measured
+accuracy falls off close to $1/\sqrt{k}$ starting from the very first added item — not staying
+flat until some large $k$.
+
+| Chunks ($k$) | Mean cos-sim | Retrieval Accuracy (Sim > 0.85) |
+|:---:|:---:|:---:|
+| 1 | 1.000 | 100.0% |
+| 2 | 0.715 | 0.0% |
+| 5 | 0.440 | 0.0% |
+| 10 | 0.311 | 0.0% |
+| 20 | 0.219 | 0.0% |
+| 100 | 0.102 | 0.0% |
+| 2,000 | 0.022 | 0.0% |
+| 20,000 | 0.005 | 0.0% |
+| 30,000 | 0.007 | 0.0% |
+
+Run it yourself: `cargo run --release --example hrr_benchmark -p daemon`
+(`daemon/examples/hrr_benchmark.rs`). It's the same `neural_math` code the app ships with, not a
+separate calculation.
+
+**What this means in practice:** a single 1536-dim global vector reliably holds *one* superposed
+item under this system's own retrieval threshold. Holding more needs one of: (a) a materially
+looser decode rule — nearest-neighbor against a known candidate set, the regime the $d/(k-1)$
+result actually describes, cheap to add but changes what "retrieval" means; or (b) partitioning
+the index instead of superposing everything into one vector — many smaller vectors (one per
+file, cluster, or directory) rather than one global 6KB vector. `LimbicIndex`/`LimbicMap` in
+`hades-kernel/src/jit_decompression/semantic_map.rs` already scaffold exactly this
+(per-cluster indices, activation-threshold retrieval) — it just isn't wired into the live
+chunk-indexing path yet (`neuraldrive/src-tauri/src/lib.rs` currently accumulates everything
+into one `global_vector`). That's the real next step, not yet shipped, and this README no
+longer claims 30,000-file-scale superposition works until it's been measured at that scale
+under that mechanism.
 
 ---
 
-## ⚡ Real-World Benchmarks & Performance Target
+## ⚡ Real-World Benchmarks
 
-The mathematical stability of our superposition indexing maps has been validated across multiple repository testing pipelines.
+Semantic retrieval accuracy is covered above ("Measured Capacity"), with a runnable harness —
+that's the one number in this README with a script behind it.
 
-### 1. Semantic Retrieval Accuracy
-We compared target script recovery rates of our Superposition system against the old serial convolution cascade loop.
-
-| Codebase Scale | Chunks ($k$) | Old Cascade Similarity | New Superposition Similarity | Retrieval Accuracy (%) |
-|:---|:---:|:---:|:---:|:---:|
-| **1 MB** (Small Script) | 20 | 0.428 | 0.985 | **100.0%** |
-| **100 MB** (Startup App) | 200 | 0.051 | 0.962 | **100.0%** |
-| **1 GB** (Enterprise Code) | 2,000 | 0.012 | 0.924 | **99.8%** |
-| **5 GB** (Monorepo) | 10,000 | 0.001 | 0.891 | **99.4%** |
-| **10 GB** (AI Training Pipeline) | 20,000 | 0.000 | 0.865 | **99.1%** |
-
-### 2. Prompt Cache Performance and Financial Savings
-Under continuous development saving cycles where files are repeatedly compiled, saved, and modified:
-* **System Prompt Cache Hit Rate:** Stable at **99.97%** prefix caching under continuous repository edits.
-* **Network Latency Latency Reduction:** Active interaction frame response times dropped by **88.4%** (from 4.2s to 0.48s average).
-* **Token Cost Reductions:** Achieved a cumulative **91.4% reduction** in token consumption, entirely removing high-cost financial scaling thresholds when processing massive software repositories.
+**Prompt-cache hit rate, latency reduction, and token-cost reduction are not covered by a
+harness yet.** An earlier version of this README stated specific figures for these (a cache hit
+rate, a latency reduction, a token-cost reduction) without one. Removed rather than left in:
+they'd need an actual measured session against a real model server (prefix-cache hit/miss
+counts, wall-clock latency, token counts, before/after) to say honestly, and that harness
+doesn't exist yet. The mechanism this claims to help — KV-slot prefix caching — is real and
+shipped (see the outer IDE's `kortex/aim-proxy` integration); the *numbers* for it are not, until
+measured.
 
 ---
 

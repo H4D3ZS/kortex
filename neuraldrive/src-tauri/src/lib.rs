@@ -165,25 +165,10 @@ async fn build_aim_binary(project_path: String) -> Result<String, String> {
                             }
 
                             // 2. Holographic Reduced Representation (HRR): Bind Chunk to Path-Key
-                            // We generate a deterministic Key Vector for the path to prevent signal destruction
-                            let mut path_key = [0.0f32; 1536];
-                            let path_bytes = path_str.as_bytes();
-                            for i in 0..1536 {
-                                let val = if !path_bytes.is_empty() {
-                                    let char_val = path_bytes[i % path_bytes.len()] as f32;
-                                    (char_val * (i as f32).sin()).sin()
-                                } else {
-                                    (i as f32).sin()
-                                };
-                                path_key[i] = val;
-                            }
-                            
-                            let key_mag = (path_key.iter().map(|x| x * x).sum::<f32>()).sqrt();
-                            if key_mag > 1e-6 {
-                                for val in path_key.iter_mut() {
-                                    *val /= key_mag;
-                                }
-                            }
+                            // Deterministic but hash-seeded (see daemon::neural_math::path_key) —
+                            // similar paths must NOT produce correlated keys, or HRR unbinding
+                            // interferes exactly among the files most likely retrieved together.
+                            let path_key = daemon::neural_math::path_key(&path_str);
 
                             // Bind the path key to its content vector value via circular convolution
                             let bound_state = daemon::neural_math::circular_convolution(&path_key, &chunk_vec);
